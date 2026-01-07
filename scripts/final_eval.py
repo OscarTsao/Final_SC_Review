@@ -28,6 +28,13 @@ def main() -> None:
     parser.add_argument("--best_config", type=str, required=True)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument(
+        "--split",
+        type=str,
+        default="test",
+        choices=["val", "test"],
+        help="Evaluation split (default: test)",
+    )
+    parser.add_argument(
         "--dual_eval",
         action="store_true",
         help="Run dual evaluation (both positives-only and all-queries modes)",
@@ -49,7 +56,7 @@ def main() -> None:
         val_ratio=cfg["split"]["val_ratio"],
         test_ratio=cfg["split"]["test_ratio"],
     )
-    test_posts = set(splits["test"])
+    eval_posts = set(splits[args.split])
 
     sentences = load_sentence_corpus(Path(cfg["paths"]["sentence_corpus"]))
     cache_dir = Path(cfg["paths"]["cache_dir"])
@@ -100,7 +107,7 @@ def main() -> None:
 
     grouped: Dict[tuple, List] = {}
     for row in groundtruth:
-        if row.post_id not in test_posts:
+        if row.post_id not in eval_posts:
             continue
         grouped.setdefault((row.post_id, row.criterion_id), []).append(row)
 
@@ -167,7 +174,7 @@ def main() -> None:
         summary = {
             "retriever": retriever_dual,
             "reranked": reranked_dual,
-            "eval_split": "test",
+            "eval_split": args.split,
             "eval_mode": "dual",
         }
         logger.info("\n=== Retriever Results ===")
@@ -183,7 +190,7 @@ def main() -> None:
             "reranked": evaluate_rankings(
                 reranked_results, ks=ks, skip_no_positives=cfg["evaluation"]["skip_no_positives"]
             ),
-            "eval_split": "test",
+            "eval_split": args.split,
             "eval_mode": "standard",
         }
 
