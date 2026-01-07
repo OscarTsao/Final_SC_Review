@@ -98,17 +98,22 @@ class InferenceObjective:
                     }
                 )
 
+            retriever_metrics = evaluate_rankings(
+                retriever_results,
+                ks=self.cfg.ks,
+                skip_no_positives=self.cfg.skip_no_positives,
+            )
             reranked_metrics = evaluate_rankings(
                 reranked_results,
                 ks=self.cfg.ks,
                 skip_no_positives=self.cfg.skip_no_positives,
             )
-            value = _select_metric(reranked_metrics, self.cfg.objective_metric)
+            value = _select_metric_dual(retriever_metrics, reranked_metrics, self.cfg.objective_metric)
             trial.report(value, step=chunk_end)
             if chunk_end >= self.cfg.prune_min_queries and trial.should_prune():
                 raise optuna.TrialPruned()
 
-        return _select_metric(reranked_metrics, self.cfg.objective_metric)
+        return _select_metric_dual(retriever_metrics, reranked_metrics, self.cfg.objective_metric)
 
 
 def load_cache(cache_path: Path) -> InferenceCache:
@@ -248,6 +253,20 @@ def _select_metric(metrics: Dict[str, float], key: str) -> float:
     if cleaned not in metrics:
         raise KeyError(f"Objective metric not found: {cleaned}")
     return float(metrics[cleaned])
+
+
+def _select_metric_dual(retriever_metrics: Dict[str, float], reranked_metrics: Dict[str, float], key: str) -> float:
+    """Select metric from retriever or reranked results based on suffix."""
+    if "_retriever" in key:
+        cleaned = key.replace("_retriever", "")
+        if cleaned not in retriever_metrics:
+            raise KeyError(f"Objective metric not found in retriever metrics: {cleaned}")
+        return float(retriever_metrics[cleaned])
+    else:
+        cleaned = key.replace("_reranked", "")
+        if cleaned not in reranked_metrics:
+            raise KeyError(f"Objective metric not found in reranked metrics: {cleaned}")
+        return float(reranked_metrics[cleaned])
 
 
 def _shuffled_indices(n: int, seed: int) -> List[int]:
