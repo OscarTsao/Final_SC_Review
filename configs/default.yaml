@@ -1,0 +1,43 @@
+paths:
+  data_dir: data
+  groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
+  sentence_corpus: data/groundtruth/sentence_corpus.jsonl
+  cache_dir: data/cache/bge_m3
+
+models:
+  bge_m3: BAAI/bge-m3
+  jina_v3: jinaai/jina-reranker-v3
+  bge_query_max_length: 128
+  bge_passage_max_length: 256
+  bge_use_fp16: true
+  bge_batch_size: 64
+  reranker_max_length: 512
+  reranker_chunk_size: 64
+  reranker_dtype: auto
+  reranker_use_listwise: true
+
+retriever:
+  top_k_retriever: 50
+  top_k_colbert: 50
+  top_k_final: 20
+  use_sparse: true
+  use_colbert: true
+  dense_weight: 0.6
+  sparse_weight: 0.2
+  colbert_weight: 0.2
+  fusion_method: weighted_sum
+  score_normalization: minmax_per_query
+  rrf_k: 60
+  rebuild_cache: false
+
+split:
+  seed: 42
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+evaluation:
+  split: test
+  ks: [1, 5, 10, 20]
+  skip_no_positives: true
+  save_query_csv: true

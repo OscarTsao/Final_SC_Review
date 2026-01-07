@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.dist/
+.build/
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data and outputs
+/data/
+outputs/
+artifacts/
+logs/
+
+# Model checkpoints
+*.bin
+*.pt
+*.pth
+
+# Local configs
+.env

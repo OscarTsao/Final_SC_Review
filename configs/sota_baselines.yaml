@@ -1,0 +1,11 @@
+baselines:
+  rerankers:
+    - jinaai/jina-reranker-v3
+    - BAAI/bge-reranker-v2-m3
+  retrievers:
+    - mode: dense
+      model: BAAI/bge-m3
+    - mode: hybrid
+      model: BAAI/bge-m3
+    - mode: bm25
+      model: rank-bm25

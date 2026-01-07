@@ -1,0 +1,31 @@
+paths:
+  data_dir: data
+  groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
+  output_dir: outputs/reranker_hybrid
+
+models:
+  jina_v3: jinaai/jina-reranker-v3
+  max_length: 256
+
+data:
+  max_candidates: 16
+
+split:
+  seed: 42
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+train:
+  batch_size: 1
+  num_epochs: 3
+  learning_rate: 0.00002
+  weight_decay: 0.01
+  early_stopping_patience: 3
+
+loss:
+  w_list: 1.0
+  w_pair: 1.0
+  w_point: 1.0
+  temperature: 1.0
+  max_pairs_per_group: 32
