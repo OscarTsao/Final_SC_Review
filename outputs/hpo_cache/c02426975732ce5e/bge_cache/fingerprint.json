@@ -1,0 +1,9 @@
+{
+  "fingerprint": "1fb1d1b0a0268d7d0d854e21a05dea7de96b6df31f28cebc1178b653e0051036",
+  "num_sentences": 29934,
+  "model_name": "BAAI/bge-m3",
+  "query_max_length": 128,
+  "passage_max_length": 256,
+  "use_fp16": true,
+  "batch_size": 64
+}

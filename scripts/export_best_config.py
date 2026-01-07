@@ -57,7 +57,12 @@ def _apply_hpo_params(base_cfg: dict, hpo_cfg: dict, params: dict) -> None:
     # Retriever
     retriever_cfg = base_cfg["retriever"]
     retriever_cfg["top_k_retriever"] = int(params["top_k_retriever"])
-    retriever_cfg["top_k_colbert"] = int(params["top_k_retriever"])
+
+    # V2: Support decoupled rerank pool size
+    top_k_rerank = int(params.get("top_k_rerank", params["top_k_retriever"]))
+    retriever_cfg["top_k_rerank"] = top_k_rerank
+    retriever_cfg["top_k_colbert"] = top_k_rerank  # Backward compat
+
     retriever_cfg["top_k_final"] = int(params["top_k_final"])
     retriever_cfg["use_sparse"] = bool(params["use_sparse"])
     retriever_cfg["use_colbert"] = bool(params["use_multiv"])

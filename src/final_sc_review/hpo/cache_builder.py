@@ -112,6 +112,7 @@ def _build_cache(cfg: Dict, out_dir: Path, dataset_checksums: Dict[str, str]) ->
     superset_max = cfg["cache"]["superset_max"]
     use_sparse = cfg["cache"].get("use_sparse", True)
     use_multiv = cfg["cache"].get("use_multiv", True)
+    trim_method = cfg["cache"].get("trim_method", "dense")
 
     # Group groundtruth by (post_id, criterion)
     grouped: Dict[Tuple[str, str], List] = {}
@@ -177,7 +178,14 @@ def _build_cache(cfg: Dict, out_dir: Path, dataset_checksums: Dict[str, str]) ->
             continue
 
         limit = min(len(union_indices), superset_max)
-        union_indices = _trim_by_dense(union_indices, retriever, query_dense, limit)
+        # Apply selected trim method
+        if trim_method == "rrf_dense_sparse" and use_sparse:
+            union_indices = _trim_by_rrf(union_indices, retriever, query_dense, query_sparse, limit)
+        elif trim_method == "max_normalized" and use_sparse:
+            union_indices = _trim_by_max_normalized(union_indices, retriever, query_dense, query_sparse, limit)
+        else:
+            # Default: dense-only trim (legacy behavior)
+            union_indices = _trim_by_dense(union_indices, retriever, query_dense, limit)
 
         candidate_list = []
         dense_list = []
@@ -258,6 +266,7 @@ def _topk_indices(indices: List[int], scores: np.ndarray, k: int, retriever: Bge
 
 
 def _trim_by_dense(indices: List[int], retriever: BgeM3Retriever, query_dense: np.ndarray, k: int) -> List[int]:
+    """Trim candidates by dense score (legacy method)."""
     scored = []
     for idx in indices:
         score = float(retriever.dense_vecs[idx] @ query_dense)
@@ -265,6 +274,93 @@ def _trim_by_dense(indices: List[int], retriever: BgeM3Retriever, query_dense: n
         scored.append((idx, score, sent_uid))
     scored.sort(key=lambda x: (-x[1], x[2]))
     return [idx for idx, _, _ in scored[:k]]
+
+
+def _trim_by_rrf(
+    indices: List[int],
+    retriever: BgeM3Retriever,
+    query_dense: np.ndarray,
+    query_sparse: dict,
+    k: int,
+    rrf_k: int = 60,
+) -> List[int]:
+    """Trim candidates by RRF(dense_rank, sparse_rank) for fairer selection."""
+    # Compute dense scores
+    dense_scored = []
+    for idx in indices:
+        score = float(retriever.dense_vecs[idx] @ query_dense)
+        dense_scored.append((idx, score))
+    dense_scored.sort(key=lambda x: -x[1])
+    dense_ranks = {idx: rank + 1 for rank, (idx, _) in enumerate(dense_scored)}
+
+    # Compute sparse scores
+    sparse_scored = []
+    for idx in indices:
+        doc_sparse = retriever.sparse_weights[idx] if idx < len(retriever.sparse_weights) else {}
+        score = sum(query_sparse.get(tok, 0.0) * weight for tok, weight in doc_sparse.items())
+        sparse_scored.append((idx, score))
+    sparse_scored.sort(key=lambda x: -x[1])
+    sparse_ranks = {idx: rank + 1 for rank, (idx, _) in enumerate(sparse_scored)}
+
+    # Compute RRF scores
+    rrf_scored = []
+    for idx in indices:
+        rrf_score = 1.0 / (rrf_k + dense_ranks[idx]) + 1.0 / (rrf_k + sparse_ranks[idx])
+        sent_uid = retriever.sentences[idx].sent_uid
+        rrf_scored.append((idx, rrf_score, sent_uid))
+    rrf_scored.sort(key=lambda x: (-x[1], x[2]))
+    return [idx for idx, _, _ in rrf_scored[:k]]
+
+
+def _trim_by_max_normalized(
+    indices: List[int],
+    retriever: BgeM3Retriever,
+    query_dense: np.ndarray,
+    query_sparse: dict,
+    k: int,
+) -> List[int]:
+    """Trim candidates by max(normalized_dense, normalized_sparse) for fairer selection."""
+    # Compute dense scores
+    dense_scores = []
+    for idx in indices:
+        score = float(retriever.dense_vecs[idx] @ query_dense)
+        dense_scores.append(score)
+
+    # Compute sparse scores
+    sparse_scores = []
+    for idx in indices:
+        doc_sparse = retriever.sparse_weights[idx] if idx < len(retriever.sparse_weights) else {}
+        score = sum(query_sparse.get(tok, 0.0) * weight for tok, weight in doc_sparse.items())
+        sparse_scores.append(score)
+
+    # Normalize to [0, 1]
+    def minmax_normalize(scores):
+        min_v, max_v = min(scores), max(scores)
+        if max_v > min_v:
+            return [(s - min_v) / (max_v - min_v) for s in scores]
+        return [0.0] * len(scores)
+
+    norm_dense = minmax_normalize(dense_scores)
+    norm_sparse = minmax_normalize(sparse_scores)
+
+    # Max-fused score
+    fused_scored = []
+    for i, idx in enumerate(indices):
+        fused = max(norm_dense[i], norm_sparse[i])
+        sent_uid = retriever.sentences[idx].sent_uid
+        fused_scored.append((idx, fused, sent_uid))
+    fused_scored.sort(key=lambda x: (-x[1], x[2]))
+    return [idx for idx, _, _ in fused_scored[:k]]
+
+
+def _select_trim_method(method: str):
+    """Return the appropriate trim function based on config."""
+    if method == "rrf_dense_sparse":
+        return _trim_by_rrf
+    elif method == "max_normalized":
+        return _trim_by_max_normalized
+    else:
+        return None  # Default to dense-only
 
 
 def _load_config(path: Path) -> Dict:

@@ -2,22 +2,43 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List
 
 import optuna
 
 
 def sample_inference_params(trial: optuna.Trial, cfg: Dict) -> Dict:
-    """Sample inference-stage parameters for Optuna."""
+    """Sample inference-stage parameters for Optuna.
+
+    Supports both v1 (top_k_retriever only) and v2 (top_k_retriever + top_k_rerank) configs.
+    """
     space = cfg["search_space"]
     params: Dict[str, object] = {}
 
     params["top_k_retriever"] = trial.suggest_categorical(
         "top_k_retriever", space["top_k_retriever"]
     )
+
+    # V2: Support decoupled rerank pool size
+    if "top_k_rerank" in space:
+        # Use full category list for Optuna compatibility
+        # Invalid combinations (rerank > retriever) will be handled by constraint validation
+        params["top_k_rerank"] = trial.suggest_categorical(
+            "top_k_rerank", space["top_k_rerank"]
+        )
+        # Clamp to valid range to avoid constraint violation
+        if params["top_k_rerank"] > params["top_k_retriever"]:
+            params["top_k_rerank"] = params["top_k_retriever"]
+    else:
+        # V1 backward compat: rerank pool = retriever pool
+        params["top_k_rerank"] = params["top_k_retriever"]
+
     params["top_k_final"] = trial.suggest_categorical(
         "top_k_final", space["top_k_final"]
     )
+    # Clamp final to valid range
+    if params["top_k_final"] > params["top_k_rerank"]:
+        params["top_k_final"] = params["top_k_rerank"]
 
     params["use_sparse"] = trial.suggest_categorical("use_sparse", space["use_sparse"])
     params["use_multiv"] = trial.suggest_categorical("use_multiv", space["use_multiv"])

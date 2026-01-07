@@ -1,0 +1,11 @@
+{
+  "top_k_retriever": 24,
+  "top_k_final": 5,
+  "use_sparse": false,
+  "use_multiv": true,
+  "fusion_method": "weighted_sum",
+  "score_normalization": "zscore_per_query",
+  "w_dense": 0.3585302684441886,
+  "w_sparse": 0.25046647163869806,
+  "w_multiv": 0.9962253844052456
+}

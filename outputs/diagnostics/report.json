@@ -1,0 +1,193 @@
+{
+  "split": "val",
+  "total_queries": 1470,
+  "ceiling_analysis": {
+    "queries_with_positives": 140,
+    "ceiling_by_k": {
+      "top_10": {
+        "count": 126,
+        "percentage": 90.0
+      },
+      "top_20": {
+        "count": 132,
+        "percentage": 94.29
+      },
+      "top_50": {
+        "count": 137,
+        "percentage": 97.86
+      },
+      "top_100": {
+        "count": 137,
+        "percentage": 97.86
+      }
+    },
+    "best_rank_distribution": {
+      "min": 1,
+      "max": 36,
+      "mean": 3.55,
+      "median": 1
+    },
+    "never_in_top_k": {
+      "count": 3,
+      "percentage": 2.14,
+      "k": 100
+    }
+  },
+  "failure_taxonomy": {
+    "total_queries": 1470,
+    "queries_with_positives": 140,
+    "queries_no_positives": 1330,
+    "by_criterion": {
+      "A.1": {
+        "with_pos": 38,
+        "no_pos": 109
+      },
+      "A.2": {
+        "with_pos": 12,
+        "no_pos": 135
+      },
+      "A.3": {
+        "with_pos": 7,
+        "no_pos": 140
+      },
+      "A.4": {
+        "with_pos": 11,
+        "no_pos": 136
+      },
+      "A.5": {
+        "with_pos": 1,
+        "no_pos": 146
+      },
+      "A.6": {
+        "with_pos": 11,
+        "no_pos": 136
+      },
+      "A.7": {
+        "with_pos": 34,
+        "no_pos": 113
+      },
+      "A.8": {
+        "with_pos": 5,
+        "no_pos": 142
+      },
+      "A.9": {
+        "with_pos": 11,
+        "no_pos": 136
+      },
+      "A.10": {
+        "with_pos": 10,
+        "no_pos": 137
+      }
+    }
+  },
+  "data_quality": {
+    "total_sentences": 30028,
+    "empty_text_count": 46,
+    "empty_text_pct": 0.1532,
+    "sentence_length_stats": {
+      "min": 0,
+      "max": 2069,
+      "mean": 75.5
+    },
+    "unique_posts": 1484,
+    "avg_sentences_per_post": 20.23,
+    "eval_split_sentences": 3249,
+    "groundtruth_sent_uids_in_eval": 3247,
+    "missing_in_corpus": 0
+  },
+  "per_criterion": {
+    "by_criterion": {
+      "A.6": {
+        "name": "Fatigue or loss of energy nearly every day.",
+        "num_queries": 11,
+        "ndcg@10": 0.7605,
+        "recall@10": 0.9091,
+        "mrr@10": 0.7197
+      },
+      "A.4": {
+        "name": "Insomnia or hypersomnia nearly every day.",
+        "num_queries": 11,
+        "ndcg@10": 0.8653,
+        "recall@10": 1.0,
+        "mrr@10": 0.8212
+      },
+      "A.1": {
+        "name": "Depressed mood most of the day, nearly every day, ",
+        "num_queries": 38,
+        "ndcg@10": 0.6534,
+        "recall@10": 0.8421,
+        "mrr@10": 0.5985
+      },
+      "A.3": {
+        "name": "Significant weight loss when not dieting or weight",
+        "num_queries": 7,
+        "ndcg@10": 0.7154,
+        "recall@10": 0.8571,
+        "mrr@10": 0.6905
+      },
+      "A.10": {
+        "name": "for non-DSM-5 clinical/positive discriminations",
+        "num_queries": 10,
+        "ndcg@10": 0.5135,
+        "recall@10": 1.0,
+        "mrr@10": 0.3718
+      },
+      "A.7": {
+        "name": "Feelings of worthlessness or excessive or inapprop",
+        "num_queries": 34,
+        "ndcg@10": 0.6961,
+        "recall@10": 0.8824,
+        "mrr@10": 0.6351
+      },
+      "A.9": {
+        "name": "Recurrent thoughts of death (not just fear of dyin",
+        "num_queries": 11,
+        "ndcg@10": 0.7153,
+        "recall@10": 0.9091,
+        "mrr@10": 0.6621
+      },
+      "A.2": {
+        "name": "Markedly diminished interest or pleasure in all, o",
+        "num_queries": 12,
+        "ndcg@10": 0.7212,
+        "recall@10": 0.9167,
+        "mrr@10": 0.6528
+      },
+      "A.5": {
+        "name": "Psychomotor agitation or retardation nearly every ",
+        "num_queries": 1,
+        "ndcg@10": 1.0,
+        "recall@10": 1.0,
+        "mrr@10": 1.0
+      },
+      "A.8": {
+        "name": "Diminished ability to think or concentrate, or ind",
+        "num_queries": 5,
+        "ndcg@10": 0.9,
+        "recall@10": 1.0,
+        "mrr@10": 0.8667
+      }
+    },
+    "best_criterion": [
+      "A.5",
+      {
+        "name": "Psychomotor agitation or retardation nearly every ",
+        "num_queries": 1,
+        "ndcg@10": 1.0,
+        "recall@10": 1.0,
+        "mrr@10": 1.0
+      }
+    ],
+    "worst_criterion": [
+      "A.10",
+      {
+        "name": "for non-DSM-5 clinical/positive discriminations",
+        "num_queries": 10,
+        "ndcg@10": 0.5135,
+        "recall@10": 1.0,
+        "mrr@10": 0.3718
+      }
+    ],
+    "macro_avg_ndcg@10": 0.7541
+  }
+}

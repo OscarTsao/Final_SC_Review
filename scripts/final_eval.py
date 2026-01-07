@@ -15,7 +15,7 @@ import yaml
 from final_sc_review.data.io import load_criteria, load_groundtruth, load_sentence_corpus
 from final_sc_review.data.splits import split_post_ids
 from final_sc_review.hpo.reporting import build_run_manifest, write_json
-from final_sc_review.metrics.retrieval_eval import evaluate_rankings
+from final_sc_review.metrics.retrieval_eval import dual_evaluate, evaluate_rankings, format_dual_metrics
 from final_sc_review.pipeline.three_stage import PipelineConfig, ThreeStagePipeline
 from final_sc_review.retriever.bge_m3 import BgeM3Retriever
 from final_sc_review.utils.logging import get_logger
@@ -27,6 +27,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--best_config", type=str, required=True)
     parser.add_argument("--output_dir", type=str, default=None)
+    parser.add_argument(
+        "--dual_eval",
+        action="store_true",
+        help="Run dual evaluation (both positives-only and all-queries modes)",
+    )
     args = parser.parse_args()
 
     with open(args.best_config, "r", encoding="utf-8") as f:
@@ -61,6 +66,11 @@ def main() -> None:
         rebuild_cache=False,
     )
 
+    # Support both old (top_k_colbert) and new (top_k_rerank) config options
+    top_k_rerank = cfg["retriever"].get("top_k_rerank")
+    if top_k_rerank is None:
+        top_k_rerank = cfg["retriever"].get("top_k_colbert", cfg["retriever"]["top_k_retriever"])
+
     pipeline_cfg = PipelineConfig(
         bge_model=cfg["models"]["bge_m3"],
         jina_model=cfg["models"]["jina_v3"],
@@ -77,7 +87,8 @@ def main() -> None:
         use_sparse=cfg["retriever"].get("use_sparse", True),
         use_colbert=cfg["retriever"].get("use_colbert", True),
         top_k_retriever=cfg["retriever"]["top_k_retriever"],
-        top_k_colbert=cfg["retriever"].get("top_k_colbert", cfg["retriever"]["top_k_retriever"]),
+        top_k_colbert=top_k_rerank,  # Deprecated, use top_k_rerank
+        top_k_rerank=top_k_rerank,
         top_k_final=cfg["retriever"]["top_k_final"],
         reranker_max_length=cfg["models"].get("reranker_max_length", 512),
         reranker_chunk_size=cfg["models"].get("reranker_chunk_size", 64),
@@ -149,15 +160,32 @@ def main() -> None:
             }
         )
 
-    summary = {
-        "retriever": evaluate_rankings(
-            retriever_results, ks=ks, skip_no_positives=cfg["evaluation"]["skip_no_positives"]
-        ),
-        "reranked": evaluate_rankings(
-            reranked_results, ks=ks, skip_no_positives=cfg["evaluation"]["skip_no_positives"]
-        ),
-        "eval_split": "test",
-    }
+    if args.dual_eval:
+        # Dual evaluation: both positives-only and all-queries modes
+        retriever_dual = dual_evaluate(retriever_results, ks=ks)
+        reranked_dual = dual_evaluate(reranked_results, ks=ks)
+        summary = {
+            "retriever": retriever_dual,
+            "reranked": reranked_dual,
+            "eval_split": "test",
+            "eval_mode": "dual",
+        }
+        logger.info("\n=== Retriever Results ===")
+        logger.info("\n%s", format_dual_metrics(retriever_dual, k=10))
+        logger.info("\n=== Reranked Results ===")
+        logger.info("\n%s", format_dual_metrics(reranked_dual, k=10))
+    else:
+        # Standard evaluation with configured skip_no_positives
+        summary = {
+            "retriever": evaluate_rankings(
+                retriever_results, ks=ks, skip_no_positives=cfg["evaluation"]["skip_no_positives"]
+            ),
+            "reranked": evaluate_rankings(
+                reranked_results, ks=ks, skip_no_positives=cfg["evaluation"]["skip_no_positives"]
+            ),
+            "eval_split": "test",
+            "eval_mode": "standard",
+        }
 
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.output_dir) if args.output_dir else Path("outputs/final_eval") / timestamp

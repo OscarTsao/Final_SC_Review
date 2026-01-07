@@ -1,0 +1,37 @@
+# Training data generation config with hard negative mining
+
+paths:
+  data_dir: data
+  groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
+  sentence_corpus: data/groundtruth/sentence_corpus.jsonl
+  criteria: data/DSM5/MDD_Criteira.json
+  cache_dir: outputs/embeddings
+  output: outputs/training/train_hard_neg.jsonl
+
+models:
+  bge_m3: BAAI/bge-m3
+  bge_query_max_length: 128
+  bge_passage_max_length: 256
+  bge_use_fp16: true
+  bge_batch_size: 64
+
+split:
+  seed: 42
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+hard_negative:
+  enabled: true
+  # Mining method: top_k_hard (highest scoring non-gold) or semi_hard (ranked k1-k2)
+  method: top_k_hard
+  # Number of hard negatives per query
+  k_neg: 3
+  # For semi_hard method: rank range to sample from
+  rank_low: 5
+  rank_high: 50
+  # How many candidates to retrieve for mining
+  retriever_top_k: 100
+  # Whether to include in-batch negatives (from other posts)
+  include_in_batch: false
+  in_batch_k_neg: 2
