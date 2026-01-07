@@ -172,9 +172,12 @@ def _rank_query(cache: InferenceCache, idx: int, params: Dict) -> (List[str], Li
     top_k_retriever = int(params["top_k_retriever"])
     retriever_ranked = [candidate_ids[i] for i in ranked_indices[:top_k_retriever]]
 
-    # Rerank with cached Jina scores
+    # V2: Use decoupled rerank pool size (defaults to retriever pool for backward compat)
+    top_k_rerank = int(params.get("top_k_rerank", top_k_retriever))
     top_k_final = int(params["top_k_final"])
-    rerank_candidates = ranked_indices[:top_k_retriever]
+
+    # Rerank with cached Jina scores (only on top_k_rerank candidates)
+    rerank_candidates = ranked_indices[:top_k_rerank]
     rerank_scored = []
     for i in rerank_candidates:
         rerank_scored.append((candidate_ids[i], float(jina_scores[i])))

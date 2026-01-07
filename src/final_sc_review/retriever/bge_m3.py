@@ -343,9 +343,9 @@ class BgeM3Retriever:
             zip(indices, fused_scores.tolist()),
             key=lambda x: (-x[1], self.sentences[x[0]].sent_uid),
         )
-        pool_k = min(top_k_retriever, top_k_colbert)
+        # Return top_k_retriever candidates; reranking pool size is handled by pipeline
         results = []
-        for idx, score in ranked[:pool_k]:
+        for idx, score in ranked[:top_k_retriever]:
             sent = self.sentences[idx]
             results.append((sent.sent_uid, sent.text, float(score)))
         return results

@@ -31,13 +31,21 @@ class PipelineConfig:
     use_sparse: bool = True
     use_colbert: bool = True
     top_k_retriever: int = 50
-    top_k_colbert: int = 50
+    top_k_colbert: int = 50  # Deprecated: use top_k_rerank instead
+    top_k_rerank: Optional[int] = None  # If None, defaults to top_k_retriever
     top_k_final: int = 20
     reranker_max_length: int = 512
     reranker_chunk_size: int = 64
     reranker_dtype: str = "auto"
     reranker_use_listwise: bool = True
     device: Optional[str] = None
+
+    def get_top_k_rerank(self) -> int:
+        """Get effective rerank pool size with backward compatibility."""
+        if self.top_k_rerank is not None:
+            return self.top_k_rerank
+        # Backward compat: use top_k_colbert if set, else top_k_retriever
+        return self.top_k_colbert if self.top_k_colbert else self.top_k_retriever
 
 
 class ThreeStagePipeline:
@@ -77,7 +85,7 @@ class ThreeStagePipeline:
             query=query,
             post_id=post_id,
             top_k_retriever=self.config.top_k_retriever,
-            top_k_colbert=self.config.top_k_colbert,
+            top_k_colbert=self.config.top_k_retriever,  # Not used for slicing anymore
             dense_weight=self.config.dense_weight,
             sparse_weight=self.config.sparse_weight,
             colbert_weight=self.config.colbert_weight,
@@ -90,7 +98,9 @@ class ThreeStagePipeline:
         if not retrieved:
             return []
 
-        candidates = retrieved[: self.config.top_k_colbert]
+        # Use decoupled rerank pool size
+        top_k_rerank = self.config.get_top_k_rerank()
+        candidates = retrieved[:top_k_rerank]
         candidate_ids = [sid for sid, _, _ in candidates]
         candidate_texts = [text for _, text, _ in candidates]
 

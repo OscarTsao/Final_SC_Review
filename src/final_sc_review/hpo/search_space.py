@@ -2,19 +2,36 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List
 
 import optuna
 
 
 def sample_inference_params(trial: optuna.Trial, cfg: Dict) -> Dict:
-    """Sample inference-stage parameters for Optuna."""
+    """Sample inference-stage parameters for Optuna.
+
+    Supports both v1 (top_k_retriever only) and v2 (top_k_retriever + top_k_rerank) configs.
+    """
     space = cfg["search_space"]
     params: Dict[str, object] = {}
 
     params["top_k_retriever"] = trial.suggest_categorical(
         "top_k_retriever", space["top_k_retriever"]
     )
+
+    # V2: Support decoupled rerank pool size
+    if "top_k_rerank" in space:
+        # Filter valid rerank values (<= retriever)
+        valid_rerank = [k for k in space["top_k_rerank"] if k <= params["top_k_retriever"]]
+        if not valid_rerank:
+            valid_rerank = [params["top_k_retriever"]]  # Fallback
+        params["top_k_rerank"] = trial.suggest_categorical(
+            "top_k_rerank", valid_rerank
+        )
+    else:
+        # V1 backward compat: rerank pool = retriever pool
+        params["top_k_rerank"] = params["top_k_retriever"]
+
     params["top_k_final"] = trial.suggest_categorical(
         "top_k_final", space["top_k_final"]
     )

@@ -61,6 +61,11 @@ def main() -> None:
         rebuild_cache=False,
     )
 
+    # Support both old (top_k_colbert) and new (top_k_rerank) config options
+    top_k_rerank = cfg["retriever"].get("top_k_rerank")
+    if top_k_rerank is None:
+        top_k_rerank = cfg["retriever"].get("top_k_colbert", cfg["retriever"]["top_k_retriever"])
+
     pipeline_cfg = PipelineConfig(
         bge_model=cfg["models"]["bge_m3"],
         jina_model=cfg["models"]["jina_v3"],
@@ -77,7 +82,8 @@ def main() -> None:
         use_sparse=cfg["retriever"].get("use_sparse", True),
         use_colbert=cfg["retriever"].get("use_colbert", True),
         top_k_retriever=cfg["retriever"]["top_k_retriever"],
-        top_k_colbert=cfg["retriever"].get("top_k_colbert", cfg["retriever"]["top_k_retriever"]),
+        top_k_colbert=top_k_rerank,  # Deprecated, use top_k_rerank
+        top_k_rerank=top_k_rerank,
         top_k_final=cfg["retriever"]["top_k_final"],
         reranker_max_length=cfg["models"].get("reranker_max_length", 512),
         reranker_chunk_size=cfg["models"].get("reranker_chunk_size", 64),
