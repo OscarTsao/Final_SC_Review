@@ -33,6 +33,9 @@ cache:
   use_sparse: true
   use_multiv: true
   rebuild_embeddings: false
+  # Trim method for candidate selection when superset > union size
+  # Options: dense (default, legacy), rrf_dense_sparse, max_normalized
+  trim_method: rrf_dense_sparse
 
 split:
   seed: 42

@@ -58,3 +58,57 @@ def evaluate_rankings(
     metrics["queries_evaluated"] = effective
     metrics["skip_no_positives"] = bool(skip_no_positives)
     return metrics
+
+
+def dual_evaluate(
+    results: Sequence[Dict],
+    ks: Sequence[int],
+) -> Dict[str, Dict[str, float]]:
+    """Run evaluation in both modes: positives-only and all-queries.
+
+    Args:
+        results: List of dicts with keys: post_id, criterion_id, gold_ids, ranked_ids.
+        ks: List of K values for metrics.
+
+    Returns:
+        Dict with two keys:
+        - "positives_only": metrics computed only on queries with gold positives
+        - "all_queries": metrics computed on all queries (includes negatives)
+
+    Rationale:
+        skip_no_positives=True inflates metrics (only measures queries where success is possible).
+        skip_no_positives=False gives realistic system-level "hit rate".
+    """
+    return {
+        "positives_only": evaluate_rankings(results, ks, skip_no_positives=True),
+        "all_queries": evaluate_rankings(results, ks, skip_no_positives=False),
+    }
+
+
+def format_dual_metrics(dual_results: Dict[str, Dict[str, float]], k: int = 10) -> str:
+    """Format dual evaluation results for display.
+
+    Args:
+        dual_results: Output from dual_evaluate().
+        k: The K value to highlight.
+
+    Returns:
+        Formatted string with key metrics.
+    """
+    pos = dual_results["positives_only"]
+    all_q = dual_results["all_queries"]
+
+    lines = [
+        f"Evaluation at k={k}:",
+        f"  Positives-only (n={pos['queries_evaluated']}):",
+        f"    nDCG@{k}:   {pos.get(f'ndcg@{k}', 0):.4f}",
+        f"    Recall@{k}: {pos.get(f'recall@{k}', 0):.4f}",
+        f"    MRR@{k}:    {pos.get(f'mrr@{k}', 0):.4f}",
+        f"  All-queries (n={all_q['queries_evaluated']}):",
+        f"    nDCG@{k}:   {all_q.get(f'ndcg@{k}', 0):.4f}",
+        f"    Recall@{k}: {all_q.get(f'recall@{k}', 0):.4f}",
+        f"    MRR@{k}:    {all_q.get(f'mrr@{k}', 0):.4f}",
+        f"  Coverage: {pos['queries_with_positives']}/{all_q['queries_total']} queries have positives "
+        f"({100*pos['queries_with_positives']/max(all_q['queries_total'],1):.1f}%)",
+    ]
+    return "\n".join(lines)
