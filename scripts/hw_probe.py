@@ -167,10 +167,84 @@ def probe_hardware() -> dict:
     }
 
 
+def get_nvidia_smi_full() -> str:
+    """Get full nvidia-smi output."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.stdout
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def compute_recommended_settings(hw_info: dict) -> dict:
+    """Compute recommended batch sizes based on VRAM."""
+    vram_gb = 0
+    # First try nvidia-smi detection
+    if hw_info.get("gpu", {}).get("available"):
+        devices = hw_info["gpu"].get("devices", [])
+        if devices:
+            vram_mb = devices[0].get("memory_mb", 0)
+            if isinstance(vram_mb, int):
+                vram_gb = vram_mb / 1024
+
+    # Fallback to torch detection
+    if vram_gb == 0 and hw_info.get("torch", {}).get("cuda_available"):
+        try:
+            import torch
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        except Exception:
+            pass
+
+    if vram_gb >= 28:
+        return {
+            "vram_detected_gb": vram_gb,
+            "top_k_retriever_max": 800,
+            "top_k_rerank_max": 400,
+            "batch_size_embed": 128,
+            "batch_size_rerank": 64,
+            "budget_tier": "high",
+        }
+    elif vram_gb >= 20:
+        return {
+            "vram_detected_gb": vram_gb,
+            "top_k_retriever_max": 400,
+            "top_k_rerank_max": 200,
+            "batch_size_embed": 64,
+            "batch_size_rerank": 32,
+            "budget_tier": "medium",
+        }
+    elif vram_gb >= 12:
+        return {
+            "vram_detected_gb": vram_gb,
+            "top_k_retriever_max": 200,
+            "top_k_rerank_max": 100,
+            "batch_size_embed": 32,
+            "batch_size_rerank": 16,
+            "budget_tier": "low",
+        }
+    else:
+        return {
+            "vram_detected_gb": vram_gb,
+            "top_k_retriever_max": 100,
+            "top_k_rerank_max": 50,
+            "batch_size_embed": 16,
+            "batch_size_rerank": 8,
+            "budget_tier": "minimal",
+        }
+
+
 def main():
     """Main entry point."""
     # Probe hardware
     hw_info = probe_hardware()
+
+    # Add recommended settings
+    hw_info["recommended"] = compute_recommended_settings(hw_info)
 
     # Print to console
     print("=" * 60)
@@ -179,16 +253,23 @@ def main():
     print(json.dumps(hw_info, indent=2))
     print("=" * 60)
 
-    # Ensure outputs directory exists
-    output_dir = Path(__file__).parent.parent / "outputs"
+    # Ensure outputs/system directory exists
+    output_dir = Path(__file__).parent.parent / "outputs" / "system"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write to file
+    # Write hw.json
     output_path = output_dir / "hw.json"
     with open(output_path, "w") as f:
         json.dump(hw_info, f, indent=2)
 
+    # Write nvidia_smi.txt
+    nvidia_smi_output = get_nvidia_smi_full()
+    nvidia_smi_path = output_dir / "nvidia_smi.txt"
+    with open(nvidia_smi_path, "w") as f:
+        f.write(nvidia_smi_output)
+
     print(f"\nHardware info saved to: {output_path}")
+    print(f"nvidia-smi output saved to: {nvidia_smi_path}")
 
     # Summary for quick reference
     print("\n--- Quick Summary ---")

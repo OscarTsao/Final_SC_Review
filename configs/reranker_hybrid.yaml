@@ -23,7 +23,7 @@ train:
   weight_decay: 0.01
   early_stopping_patience: 3
 
-loss:
+los
   w_list: 1.0
   w_pair: 1.0
   w_point: 1.0

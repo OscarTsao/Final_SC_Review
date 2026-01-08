@@ -1,0 +1,92 @@
+# LOCKED BEST CONFIGURATION FOR PAPER DEPLOYMENT
+# Generated: 2026-01-08
+# Based on: HPO best on val split (nDCG@10=0.707, Recall@20=0.957)
+# Status: LOCKED - DO NOT MODIFY without running full validation
+
+paths:
+  data_dir: data
+  groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
+  sentence_corpus: data/groundtruth/sentence_corpus.jsonl
+  cache_dir: data/cache/bge_m3
+
+models:
+  bge_m3: BAAI/bge-m3
+  jina_v3: jinaai/jina-reranker-v3
+  bge_query_max_length: 128
+  bge_passage_max_length: 256
+  bge_use_fp16: true
+  bge_batch_size: 256  # RTX 5090 optimized
+  reranker_max_length: 512
+  reranker_chunk_size: 128  # RTX 5090 optimized
+  reranker_dtype: fp16
+  reranker_use_listwise: true
+
+retriever:
+  # Best HPO parameters for inference
+  top_k_retriever: 32
+  top_k_rerank: 32
+  top_k_final: 20
+  use_sparse: true
+  use_colbert: true
+  dense_weight: 0.6
+  sparse_weight: 0.2
+  colbert_weight: 0.2
+  fusion_method: rrf
+  score_normalization: none
+  rrf_k: 60
+  rebuild_cache: false
+
+split:
+  seed: 42
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+evaluation:
+  split: val  # Default to val; change to test ONLY for final locked run
+  ks: [1, 5, 10, 20]
+  skip_no_positives: true
+  save_query_csv: true
+
+# DEPLOYMENT POSTPROCESSING (Stage E)
+# HPO Results: RF classifier with threshold 0.7 achieves 0% false evidence rate
+postprocessing:
+  # No-evidence detection (90.5% empty prevalence requires abstention)
+  no_evidence_detector:
+    method: rf_classifier  # HPO best: 0% false evidence, 100% empty recall
+    threshold: 0.7
+    features:
+      - max_score
+      - std_score
+      - top3_mean
+      - score_range
+      - min_score
+      - mean_score
+      - bottom3_mean
+      - top1_minus_top2
+      - top1_minus_mean
+      - gini
+      - entropy
+      - n_candidates
+    model_path: outputs/stageE/hpo/rf_classifier.pkl
+  # Calibration (to be fitted on train)
+  calibration:
+    method: temperature
+    temperature: 1.5  # Optional refinement
+  # Dynamic-K selection
+  dynamic_k:
+    method: elbow
+    min_k: 0
+    max_k: 20
+
+# Stage E HPO metadata
+stageE_hpo:
+  timestamp: "2026-01-08T21:03:20"
+  best_classifier: rf
+  best_threshold: 0.7
+  val_metrics:
+    false_evidence_rate: 0.0
+    empty_f1: 0.9503
+    empty_recall: 1.0
+    evidence_recall: 0.007  # Conservative but safe
+    auc: 0.6997

@@ -1,0 +1,127 @@
+# Retriever Zoo Configuration
+# Candidate dense embedding models to benchmark for MAXOUT++
+
+# Model candidates with exact HuggingFace IDs
+models:
+  # Tier 1: Current baseline (hybrid)
+  - name: bge-m3
+    model_id: BAAI/bge-m3
+    type: hybrid
+    max_length: 256
+    batch_size: 64
+    pooling: cls
+    use_fp16: true
+    priority: 1
+    notes: "Current baseline - dense + sparse + ColBERT"
+
+  # Tier 2: Strong dense embedders (general-purpose)
+  - name: bge-large-en-v1.5
+    model_id: BAAI/bge-large-en-v1.5
+    type: dense
+    max_length: 512
+    batch_size: 64
+    pooling: cls
+    query_prefix: "Represent this sentence for searching relevant passages: "
+    passage_prefix: ""
+    normalize: true
+    priority: 2
+    notes: "Strong general-purpose dense embedder"
+
+  - name: e5-large-v2
+    model_id: intfloat/e5-large-v2
+    type: dense
+    max_length: 512
+    batch_size: 64
+    pooling: mean
+    query_prefix: "query: "
+    passage_prefix: "passage: "
+    normalize: true
+    priority: 3
+    notes: "E5 family - instruction-following embeddings"
+
+  - name: gte-large-en-v1.5
+    model_id: Alibaba-NLP/gte-large-en-v1.5
+    type: dense
+    max_length: 8192
+    batch_size: 32
+    pooling: cls
+    normalize: true
+    priority: 4
+    min_vram_gb: 12
+    notes: "Long-context dense embedder"
+
+  - name: stella-en-1.5B-v5
+    model_id: dunzhang/stella_en_1.5B_v5
+    type: dense
+    max_length: 512
+    batch_size: 16
+    pooling: mean
+    normalize: true
+    priority: 5
+    min_vram_gb: 16
+    notes: "Large 1.5B parameter dense embedder - high quality but slow"
+
+  - name: nomic-embed-text-v1.5
+    model_id: nomic-ai/nomic-embed-text-v1.5
+    type: dense
+    max_length: 8192
+    batch_size: 32
+    pooling: mean
+    query_prefix: "search_query: "
+    passage_prefix: "search_document: "
+    normalize: true
+    priority: 6
+    notes: "Long-context Nomic embedder"
+
+  - name: jina-embeddings-v3
+    model_id: jinaai/jina-embeddings-v3
+    type: dense
+    max_length: 8192
+    batch_size: 32
+    pooling: mean
+    normalize: true
+    priority: 7
+    min_vram_gb: 16
+    notes: "Jina's latest embeddings - matches their reranker"
+
+  # Tier 3: Lexical baselines
+  - name: bm25
+    model_id: bm25
+    type: lexical
+    priority: 8
+    notes: "BM25 lexical baseline (Okapi)"
+
+  # Tier 4: Specialized (if installable)
+  - name: splade-cocondenser-ensembledistil
+    model_id: naver/splade-cocondenser-ensembledistil
+    type: sparse
+    max_length: 256
+    batch_size: 32
+    priority: 9
+    requires: ["splade"]
+    notes: "SPLADE sparse neural retriever (requires splade library)"
+
+# Evaluation settings
+evaluation:
+  split: val
+  oracle_recall_ks: [50, 100, 200, 400, 800]
+  ranking_ks: [1, 5, 10, 20]
+  metrics:
+    - oracle_recall
+    - ndcg
+    - mrr
+    - recall
+
+# Caching settings
+cache:
+  dir: outputs/cache/retrievers
+  top_k_max: 800
+  use_mmap: true
+  compression: none
+
+# Promotion criteria
+promotion:
+  min_oracle_recall_200: 0.94
+  min_ndcg_10: 0.65
+  max_latency_ms: 500
+  promote_top_n: 3

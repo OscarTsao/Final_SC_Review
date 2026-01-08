@@ -55,12 +55,18 @@ def sample_inference_params(trial: optuna.Trial, cfg: Dict) -> Dict:
         w_multiv = trial.suggest_float("w_multiv", 0.0, 1.0)
         weights = _normalize_weights(w_dense, w_sparse, w_multiv)
         params.update(weights)
+        params["rrf_k"] = 60  # Default for weighted_sum (unused)
     else:
         params["w_dense"] = 1.0
         params["w_sparse"] = 0.0
         params["w_multiv"] = 0.0
+        # Sample rrf_k for RRF fusion
+        rrf_k_choices = space.get("rrf_k", [60])
+        if isinstance(rrf_k_choices, list):
+            params["rrf_k"] = trial.suggest_categorical("rrf_k", rrf_k_choices)
+        else:
+            params["rrf_k"] = int(rrf_k_choices)
 
-    params["rrf_k"] = space.get("rrf_k", 60)
     return params
 
 

@@ -1,0 +1,51 @@
+# HPO Training config optimized for RTX 5090 (32GB VRAM)
+# Stage C: Reranker fine-tuning with LoRA
+
+enabled: true
+
+paths:
+  data_dir: data
+  groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
+  sentence_corpus: data/groundtruth/sentence_corpus.jsonl
+  criteria: data/DSM5/MDD_Criteira.json
+  hpo_output_dir: outputs/hpo
+
+models:
+  jina_v3: jinaai/jina-reranker-v3
+
+data:
+  max_candidates: 32  # Increased for RTX 5090
+
+split:
+  seed: 42
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+evaluation:
+  ks: [1, 5, 10, 20]
+  skip_no_positives: true
+
+hpo:
+  objective_metric: ndcg@10
+  use_lora: true  # Enable LoRA fine-tuning
+
+search_space:
+  # Model parameters
+  max_length: [256, 512]
+  batch_size: [2, 4, 8]  # Larger for RTX 5090
+  num_epochs: [1, 5]
+  learning_rate: [1e-6, 1e-4]
+  weight_decay: [1e-5, 1e-2]
+  max_pairs_per_group: [16, 32, 64]
+
+  # LoRA parameters
+  lora_rank: [4, 8, 16]
+  lora_alpha: [16, 32]
+  lora_dropout: [0.0, 0.1]
+
+  # Loss weights
+  w_list_range: [0.3, 1.0]
+  w_pair_range: [0.3, 1.0]
+  w_point_range: [0.0, 0.5]
+  temperature_range: [0.5, 2.0]

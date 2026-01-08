@@ -1,0 +1,45 @@
+# LOCKED BEST CONFIGURATION FOR STAGE C RERANKER TRAINING
+# Generated: 2026-01-08
+# Based on: Jina-v3 LoRA HPO (50 trials on val split)
+# Best trial: 40, val_loss: 0.2162
+# Status: LOCKED - DO NOT MODIFY without running full validation
+
+training:
+  model_name: jinaai/jina-reranker-v3
+  max_length: 512
+  batch_size: 8
+  num_epochs: 1  # Note: num_epochs was fixed due to config bug
+  learning_rate: 8.883738354938641e-05
+  weight_decay: 0.0026148441413559017
+
+  # Loss weights (hybrid loss)
+  w_list: 0.8472310544115415
+  w_pair: 0.934183787147188
+  w_point: 0.933951195123113
+  temperature: 1.121638845216479
+
+  # Training mode
+  training_mode: pointwise
+
+# LoRA/PEFT configuration
+peft:
+  enable: true
+  method: lora
+  r: 32
+  alpha: 32
+  dropout: 0.05
+  target_modules: null  # Auto-detect for Qwen3-based models
+
+# Memory optimization
+memory:
+  use_bf16: true
+  gradient_checkpointing: true
+  gradient_accumulation_steps: 2
+
+# HPO metadata
+hpo_metadata:
+  study_name: sc_training_jina_lora
+  n_trials: 50
+  best_trial: 40
+  best_val_loss: 0.21621320065524843
+  search_completed: 2026-01-08T23:58:40

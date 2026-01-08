@@ -1,0 +1,216 @@
+# MAXOUT++ Budget Configuration
+# Aggressive but efficient defaults for pushing beyond current best
+# Auto-scales down based on VRAM and OOM detection
+
+# Budget levels
+quick:
+  inference_hpo_trials: 1000
+  reranker_hpo_trials: 50
+  retriever_hpo_trials: 20
+  multiquery_paraphrases_per_criterion: 4
+  ensemble_max_base_models: 10
+  gnn_sweep_configs: 30
+  postprocess_hpo_trials: 1000
+  retriever_zoo_top_k_max: 200
+
+standard:
+  inference_hpo_trials: 10000
+  reranker_hpo_trials: 200
+  retriever_hpo_trials: 50
+  multiquery_paraphrases_per_criterion: 8
+  ensemble_max_base_models: 20
+  gnn_sweep_configs: 100
+  postprocess_hpo_trials: 5000
+  retriever_zoo_top_k_max: 400
+
+maxout:
+  # Inference HPO - Multi-fidelity: 20% dev -> 100% dev for top 2%
+  inference_hpo_trials: 50000
+  inference_hpo_early_stop_frac: 0.02
+  inference_hpo_fidelity_levels: [0.2, 0.5, 1.0]
+
+  # Reranker training HPO - ASHA pruning
+  reranker_hpo_trials: 500
+  reranker_hpo_top_full_eval: 10
+  reranker_hpo_top_seeds: 3
+  reranker_seeds: 5
+
+  # Retriever finetune HPO - ASHA pruning
+  retriever_hpo_trials: 200
+  retriever_hpo_top_full_eval: 5
+  retriever_hpo_top_seeds: 2
+  retriever_seeds: 3
+
+  # Multi-query paraphrase generation
+  multiquery_paraphrases_per_criterion: 12
+  multiquery_min_paraphrases: 8
+  multiquery_max_paraphrases: 20
+
+  # Ensemble stacking
+  ensemble_max_base_models: 30
+  ensemble_cv_folds: 5
+
+  # GNN sweep
+  gnn_sweep_configs: 300
+  gnn_top_full_eval: 10
+  gnn_top_seeds: 3
+
+  # Postprocessing threshold HPO (CPU, fast)
+  postprocess_hpo_trials: 10000
+
+  # Retriever zoo
+  retriever_zoo_top_k_max: 800
+  retriever_zoo_oracle_ks: [50, 100, 200, 400, 800]
+
+exhaustive:
+  # Maximum budgets for final paper submission
+  inference_hpo_trials: 100000
+  inference_hpo_early_stop_frac: 0.01
+  inference_hpo_fidelity_levels: [0.1, 0.25, 0.5, 1.0]
+
+  reranker_hpo_trials: 1000
+  reranker_hpo_top_full_eval: 20
+  reranker_hpo_top_seeds: 5
+  reranker_seeds: 10
+
+  retriever_hpo_trials: 500
+  retriever_hpo_top_full_eval: 10
+  retriever_hpo_top_seeds: 3
+  retriever_seeds: 5
+
+  multiquery_paraphrases_per_criterion: 20
+  multiquery_min_paraphrases: 10
+  multiquery_max_paraphrases: 30
+
+  ensemble_max_base_models: 50
+  ensemble_cv_folds: 10
+
+  gnn_sweep_configs: 500
+  gnn_top_full_eval: 20
+  gnn_top_seeds: 5
+
+  postprocess_hpo_trials: 50000
+
+  retriever_zoo_top_k_max: 1000
+  retriever_zoo_oracle_ks: [50, 100, 200, 400, 600, 800, 1000]
+
+# Auto-scaling thresholds based on VRAM
+vram_scaling:
+  # Scale factors for different VRAM tiers
+  tier_32gb_plus:  # RTX 5090, A100
+    scale_factor: 1.0
+    batch_size_scale: 1.0
+    max_retriever_batch: 256
+    max_reranker_chunk: 128
+
+  tier_24gb:  # RTX 4090
+    scale_factor: 0.8
+    batch_size_scale: 0.75
+    max_retriever_batch: 192
+    max_reranker_chunk: 96
+
+  tier_16gb:  # RTX 4080
+    scale_factor: 0.6
+    batch_size_scale: 0.5
+    max_retriever_batch: 128
+    max_reranker_chunk: 64
+
+  tier_12gb:  # RTX 3080
+    scale_factor: 0.5
+    batch_size_scale: 0.5
+    max_retriever_batch: 64
+    max_reranker_chunk: 32
+
+  tier_8gb:  # RTX 3070
+    scale_factor: 0.25
+    batch_size_scale: 0.25
+    max_retriever_batch: 32
+    max_reranker_chunk: 16
+
+# Retriever zoo candidates
+retriever_zoo:
+  candidates:
+    - name: bge-m3
+      model_id: BAAI/bge-m3
+      type: hybrid
+      priority: 1
+
+    - name: bge-large-en-v1.5
+      model_id: BAAI/bge-large-en-v1.5
+      type: dense
+      priority: 2
+
+    - name: e5-large-v2
+      model_id: intfloat/e5-large-v2
+      type: dense
+      priority: 3
+
+    - name: gte-large-en-v1.5
+      model_id: Alibaba-NLP/gte-large-en-v1.5
+      type: dense
+      priority: 4
+
+    - name: stella-en-1.5B-v5
+      model_id: dunzhang/stella_en_1.5B_v5
+      type: dense
+      priority: 5
+      vram_min_gb: 16
+
+    - name: nomic-embed-text-v1.5
+      model_id: nomic-ai/nomic-embed-text-v1.5
+      type: dense
+      priority: 6
+
+    - name: bm25
+      model_id: bm25
+      type: lexical
+      priority: 7
+
+# Reranker candidates
+reranker_zoo:
+  candidates:
+    - name: jina-reranker-v3
+      model_id: jinaai/jina-reranker-v3
+      lora_compatible: true
+      priority: 1
+
+    - name: bge-reranker-v2-m3
+      model_id: BAAI/bge-reranker-v2-m3
+      lora_compatible: true
+      priority: 2
+
+    - name: mxbai-rerank-large-v1
+      model_id: mixedbread-ai/mxbai-rerank-large-v1
+      lora_compatible: true
+      priority: 3
+
+# Decision gates configuration
+decision_gates:
+  D2_retriever_ceiling:
+    oracle_recall_200_threshold: 0.97
+    action_if_below: "retriever_finetuning_required"
+
+  D3_multiquery:
+    oracle_recall_improvement_threshold: 0.005
+    latency_increase_max_factor: 3.0
+
+  D4_reranker:
+    significance_p_threshold: 0.05
+    seed_stability_max_std: 0.02
+
+  D5_retriever_finetune:
+    oracle_recall_improvement_threshold: 0.01
+    downstream_f1_improvement_threshold: 0.01
+
+  D6_ensemble:
+    nested_cv_overfit_threshold: 0.05
+
+  D7_diversity:
+    f1_loss_tolerance: 0.005
+    redundancy_reduction_threshold: 0.1
+
+  D8_abstention:
+    false_evidence_improvement_threshold: 0.1
+
+  D9_gnn:
+    deployment_improvement_threshold: 0.02

@@ -1,0 +1,79 @@
+# HPO Inference Exhaustive config for RTX 5090 (32GB VRAM)
+#
+# Optimized for maximum exploration with large candidate pools
+# Key features:
+# - Increased superset_max to 800 for retriever ceiling analysis
+# - Expanded search space for exhaustive exploration
+# - Multi-fidelity evaluation with aggressive pruning
+
+paths:
+  data_dir: data
+  groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
+  sentence_corpus: data/groundtruth/sentence_corpus.jsonl
+  criteria: data/DSM5/MDD_Criteira.json
+  hpo_cache_dir: outputs/hpo_cache_exhaustive
+  hpo_output_dir: outputs/hpo
+
+models:
+  bge_m3: BAAI/bge-m3
+  bge_query_max_length: 128
+  bge_passage_max_length: 256
+  bge_use_fp16: true
+  bge_batch_size: 128  # Increased for RTX 5090
+
+reranker:
+  model_name: jinaai/jina-reranker-v3
+  chunk_size: 128  # Increased for RTX 5090
+  dtype: fp16  # Use fp16 for speed
+  max_length: 512
+
+cache:
+  # Maximized for RTX 5090 32GB VRAM
+  dense_topk_max: 800
+  sparse_topk_max: 800
+  superset_max: 800
+  use_sparse: true
+  use_multiv: true
+  rebuild_embeddings: false
+  trim_method: rrf_dense_sparse
+
+split:
+  seed: 42
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  dev_split: val
+
+evaluation:
+  ks: [1, 5, 10, 20]
+  skip_no_positives: true
+
+hpo:
+  objective_metric: ndcg@10_reranked
+  secondary_metric: mrr@10_reranked
+  prune_chunk_frac: 0.25  # 25% of queries for early pruning
+  prune_min_queries: 30
+  # Multi-fidelity settings
+  use_multi_fidelity: true
+  stage1_frac: 0.25  # 25% of dev queries for screening
+  stage2_top_pct: 0.05  # Top 5% get full evaluation
+
+search_space:
+  # Retriever pool size - exhaustive range
+  top_k_retriever: [50, 100, 200, 400, 800]
+  # Rerank pool size (must be <= retriever)
+  top_k_rerank: [25, 50, 100, 200, 400]
+  # Final output size (allow 0 for deployment-ready)
+  top_k_final: [0, 1, 3, 5, 10, 20]
+  # Signal selection
+  use_sparse: [true, false]
+  use_multiv: [true, false]
+  # Fusion methods
+  fusion_method: [weighted_sum, rrf]
+  score_normalization: [none, minmax_per_query, zscore_per_query]
+  # RRF k parameter sweep
+  rrf_k: [5, 10, 20, 40, 60, 80, 120, 200]
+  # Fusion weights (for weighted_sum) - will be sampled from simplex
+  dense_weight_range: [0.3, 0.9]
+  sparse_weight_range: [0.0, 0.4]
+  multiv_weight_range: [0.0, 0.4]
