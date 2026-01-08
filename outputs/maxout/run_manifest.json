@@ -1,0 +1,25 @@
+{
+  "start_time": "2026-01-08T20:48:51.179409",
+  "args": {
+    "phase": "maxout",
+    "budget": "maxout",
+    "allow_external_api": false,
+    "teacher_mode": "none",
+    "resume": false,
+    "strict": true,
+    "dry_run": false
+  },
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "vram_gb": 31.34844970703125,
+    "cpu_cores": 20,
+    "ram_gb": 125.15175247192383
+  },
+  "budgets": {
+    "inference_hpo_trials": 50000,
+    "reranker_hpo_trials": 500,
+    "vram_scale_factor": 1.0
+  },
+  "end_time": "2026-01-08T20:49:03.439657",
+  "status": "COMPLETED"
+}

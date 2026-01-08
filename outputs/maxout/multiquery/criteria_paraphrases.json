@@ -1,0 +1,186 @@
+{
+  "timestamp": "2026-01-09T00:22:15.939859",
+  "n_criteria": 10,
+  "n_paraphrases_target": 12,
+  "methods": [
+    "rule_based",
+    "synonym_replacement",
+    "question_form"
+  ],
+  "allow_external_api": false,
+  "criteria_paraphrases": {
+    "A.1": {
+      "original": "Depressed mood most of the day, nearly every day, as indicated by either subjective report (e.g., feels sad, empty, hopeless) or observation made by others (e.g., appears tearful).",
+      "paraphrases": [
+        "Depressed mood most of the day, nearly every day, as indicated by either subjective report (e.g., feels sad, empty, hopeless) or observation made by others (e.g., appears tearful).",
+        "Depressed mood frequently, as indicated by either subjective report (e.g., feels sad, empty, hopeless) or observation made by others (e.g., appears tearful).",
+        "Depressed mood on most days, as indicated by either subjective report (e.g., feels sad, empty, hopeless) or observation made by others (e.g., appears tearful).",
+        "Depressed mood most of the day, almost daily, as indicated by either subjective report (e.g., feels sad, empty, hopeless) or observation made by others (e.g., appears tearful).",
+        "Depressed mood most of the day, on a regular basis, as indicated by either subjective report (e.g., feels sad, empty, hopeless) or observation made by others (e.g., appears tearful).",
+        "Depressed mood most of the day, nearly every day, .",
+        "Depressed mood most of the day, nearly every day, as indicated by either subjective report or observation made by others .",
+        "sad mood most of the day, nearly every day, as indicated by either subjective report (e.g., feels sad, empty, hopeless) or observation made by others (e.g., appears tearful).",
+        "down mood most of the day, nearly every day, as indicated by either subjective report (e.g., feels sad, empty, hopeless) or observation made by others (e.g., appears tearful).",
+        "low mood most of the day, nearly every day, as indicated by either subjective report (e.g., feels sad, empty, hopeless) or observation made by others (e.g., appears tearful).",
+        "Depressed mood most of the day, nearly every day, as indicated by either subjective report (e.g., feels unhappy, empty, hopeless) or observation made by others (e.g., appears tearful).",
+        "Depressed mood most of the day, nearly every day, as indicated by either subjective report (e.g., feels sorrowful, empty, hopeless) or observation made by others (e.g., appears tearful)."
+      ],
+      "count": 12
+    },
+    "A.2": {
+      "original": "Markedly diminished interest or pleasure in all, or almost all, activities most of the day, nearly every day (as indicated by either subjective account or observation).",
+      "paraphrases": [
+        "Markedly diminished interest or pleasure in all, or almost all, activities most of the day, nearly every day (as indicated by either subjective account or observation).",
+        "Markedly diminished interest or pleasure in all, or almost all, activities frequently (as indicated by either subjective account or observation).",
+        "Markedly diminished interest or pleasure in all, or almost all, activities on most days (as indicated by either subjective account or observation).",
+        "Markedly diminished interest or pleasure in all, or almost all, activities most of the day, almost daily (as indicated by either subjective account or observation).",
+        "Markedly diminished interest or pleasure in all, or almost all, activities most of the day, on a regular basis (as indicated by either subjective account or observation).",
+        "Markedly diminished interest or pleasure in all, or almost all, activities most of the day, nearly every day .",
+        "Markedly diminished enthusiasm or pleasure in all, or almost all, activities most of the day, nearly every day (as indicated by either subjective account or observation).",
+        "Markedly diminished motivation or pleasure in all, or almost all, activities most of the day, nearly every day (as indicated by either subjective account or observation).",
+        "Markedly diminished engagement or pleasure in all, or almost all, activities most of the day, nearly every day (as indicated by either subjective account or observation).",
+        "Markedly diminished interest or enjoyment in all, or almost all, activities most of the day, nearly every day (as indicated by either subjective account or observation).",
+        "Markedly diminished interest or satisfaction in all, or almost all, activities most of the day, nearly every day (as indicated by either subjective account or observation).",
+        "Markedly diminished interest or joy in all, or almost all, activities most of the day, nearly every day (as indicated by either subjective account or observation)."
+      ],
+      "count": 12
+    },
+    "A.3": {
+      "original": "Significant weight loss when not dieting or weight gain (e.g., a change of more than 5% of body weight in a month), or decrease or increase in appetite nearly every day.",
+      "paraphrases": [
+        "Significant weight loss when not dieting or weight gain (e.g., a change of more than 5% of body weight in a month), or decrease or increase in appetite nearly every day.",
+        "Significant weight loss when not dieting or weight gain (e.g., a change of more than 5% of body weight in a month), or decrease or increase in appetite almost daily.",
+        "Significant weight loss when not dieting or weight gain (e.g., a change of more than 5% of body weight in a month), or decrease or increase in appetite on a regular basis.",
+        "Significant weight loss when not dieting or weight gain , or decrease or increase in appetite nearly every day.",
+        "Significant losing weight when not dieting or weight gain (e.g., a change of more than 5% of body weight in a month), or decrease or increase in appetite nearly every day.",
+        "Significant weight reduction when not dieting or weight gain (e.g., a change of more than 5% of body weight in a month), or decrease or increase in appetite nearly every day.",
+        "Significant getting thinner when not dieting or weight gain (e.g., a change of more than 5% of body weight in a month), or decrease or increase in appetite nearly every day.",
+        "Significant weight loss when not dieting or gaining weight (e.g., a change of more than 5% of body weight in a month), or decrease or increase in appetite nearly every day.",
+        "Significant weight loss when not dieting or weight increase (e.g., a change of more than 5% of body weight in a month), or decrease or increase in appetite nearly every day.",
+        "Significant weight loss when not dieting or getting heavier (e.g., a change of more than 5% of body weight in a month), or decrease or increase in appetite nearly every day.",
+        "Significant weight loss when not dieting or weight gain (e.g., a change of more than 5% of body weight in a month), or decrease or increase in hunger nearly every day.",
+        "Significant weight loss when not dieting or weight gain (e.g., a change of more than 5% of body weight in a month), or decrease or increase in desire to eat nearly every day."
+      ],
+      "count": 12
+    },
+    "A.4": {
+      "original": "Insomnia or hypersomnia nearly every day.",
+      "paraphrases": [
+        "Insomnia or hypersomnia nearly every day.",
+        "Insomnia or hypersomnia almost daily.",
+        "Insomnia or hypersomnia on a regular basis.",
+        "difficulty sleeping or hypersomnia nearly every day.",
+        "can't sleep or hypersomnia nearly every day.",
+        "sleeplessness or hypersomnia nearly every day.",
+        "Insomnia or sleeping too much nearly every day.",
+        "Insomnia or excessive sleep nearly every day.",
+        "Insomnia or oversleeping nearly every day.",
+        "difficulty sleeping or hypersomnia almost daily.",
+        "can't sleep or hypersomnia almost daily.",
+        "sleeplessness or hypersomnia almost daily."
+      ],
+      "count": 12
+    },
+    "A.5": {
+      "original": "Psychomotor agitation or retardation nearly every day (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+      "paraphrases": [
+        "Psychomotor agitation or retardation nearly every day (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+        "Psychomotor agitation or retardation almost daily (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+        "Psychomotor agitation or retardation on a regular basis (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+        "Psychomotor agitation or retardation nearly every day .",
+        "Psychomotor restlessness or retardation nearly every day (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+        "Psychomotor fidgeting or retardation nearly every day (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+        "Psychomotor nervousness or retardation nearly every day (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+        "Psychomotor agitation or slowing down nearly every day (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+        "Psychomotor agitation or sluggishness nearly every day (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+        "Psychomotor agitation or moving slowly nearly every day (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+        "Psychomotor restlessness or retardation almost daily (observable by others, not merely subjective feelings of restlessness or being slowed down).",
+        "Psychomotor fidgeting or retardation almost daily (observable by others, not merely subjective feelings of restlessness or being slowed down)."
+      ],
+      "count": 12
+    },
+    "A.6": {
+      "original": "Fatigue or loss of energy nearly every day.",
+      "paraphrases": [
+        "Fatigue or loss of energy nearly every day.",
+        "Fatigue or loss of energy almost daily.",
+        "Fatigue or loss of energy on a regular basis.",
+        "tiredness or loss of energy nearly every day.",
+        "exhaustion or loss of energy nearly every day.",
+        "lack of energy or loss of energy nearly every day.",
+        "tiredness or loss of energy almost daily.",
+        "exhaustion or loss of energy almost daily.",
+        "lack of energy or loss of energy almost daily.",
+        "tiredness or loss of energy on a regular basis.",
+        "exhaustion or loss of energy on a regular basis.",
+        "lack of energy or loss of energy on a regular basis."
+      ],
+      "count": 12
+    },
+    "A.7": {
+      "original": "Feelings of worthlessness or excessive or inappropriate guilt (which may be delusional) nearly every day (not merely self-reproach or guilt about being sick).",
+      "paraphrases": [
+        "Feelings of worthlessness or excessive or inappropriate guilt (which may be delusional) nearly every day (not merely self-reproach or guilt about being sick).",
+        "Feelings of worthlessness or excessive or inappropriate guilt (which may be delusional) almost daily (not merely self-reproach or guilt about being sick).",
+        "Feelings of worthlessness or excessive or inappropriate guilt (which may be delusional) on a regular basis (not merely self-reproach or guilt about being sick).",
+        "Feelings of worthlessness or excessive or inappropriate guilt nearly every day (not merely self-reproach or guilt about being sick).",
+        "Feelings of worthlessness or excessive or inappropriate guilt (which may be delusional) nearly every day .",
+        "Feelings of feeling worthless or excessive or inappropriate guilt (which may be delusional) nearly every day (not merely self-reproach or guilt about being sick).",
+        "Feelings of low self-worth or excessive or inappropriate guilt (which may be delusional) nearly every day (not merely self-reproach or guilt about being sick).",
+        "Feelings of feeling useless or excessive or inappropriate guilt (which may be delusional) nearly every day (not merely self-reproach or guilt about being sick).",
+        "Feelings of worthlessness or excessive or inappropriate feeling guilty (which may be delusional) nearly every day (not merely self-reproach or feeling guilty about being sick).",
+        "Feelings of worthlessness or excessive or inappropriate self-blame (which may be delusional) nearly every day (not merely self-reproach or self-blame about being sick).",
+        "Feelings of worthlessness or excessive or inappropriate remorse (which may be delusional) nearly every day (not merely self-reproach or remorse about being sick).",
+        "Feelings of feeling worthless or excessive or inappropriate guilt (which may be delusional) almost daily (not merely self-reproach or guilt about being sick)."
+      ],
+      "count": 12
+    },
+    "A.8": {
+      "original": "Diminished ability to think or concentrate, or indecisiveness, nearly every day (either by subjective account or as observed by others).",
+      "paraphrases": [
+        "Diminished ability to think or concentrate, or indecisiveness, nearly every day (either by subjective account or as observed by others).",
+        "Diminished ability to think or concentrate, or indecisiveness, almost daily (either by subjective account or as observed by others).",
+        "Diminished ability to think or concentrate, or indecisiveness, on a regular basis (either by subjective account or as observed by others).",
+        "Diminished ability to think or concentrate, or indecisiveness, nearly every day .",
+        "reduced ability to think or concentrate, or indecisiveness, nearly every day (either by subjective account or as observed by others).",
+        "decreased ability to think or concentrate, or indecisiveness, nearly every day (either by subjective account or as observed by others).",
+        "lessened ability to think or concentrate, or indecisiveness, nearly every day (either by subjective account or as observed by others).",
+        "Diminished ability to think or focus, or indecisiveness, nearly every day (either by subjective account or as observed by others).",
+        "Diminished ability to think or pay attention, or indecisiveness, nearly every day (either by subjective account or as observed by others).",
+        "Diminished ability to think or think clearly, or indecisiveness, nearly every day (either by subjective account or as observed by others).",
+        "Diminished ability to think or concentrate, or difficulty making decisions, nearly every day (either by subjective account or as observed by others).",
+        "Diminished ability to think or concentrate, or can't decide, nearly every day (either by subjective account or as observed by others)."
+      ],
+      "count": 12
+    },
+    "A.9": {
+      "original": "Recurrent thoughts of death (not just fear of dying), recurrent suicidal ideation without a specific plan, or a suicide attempt or a specific plan for committing suicide.",
+      "paraphrases": [
+        "Recurrent thoughts of death (not just fear of dying), recurrent suicidal ideation without a specific plan, or a suicide attempt or a specific plan for committing suicide.",
+        "Recurrent thoughts of death , recurrent suicidal ideation without a specific plan, or a suicide attempt or a specific plan for committing suicide.",
+        "Recurrent thoughts of dying (not just fear of dying), recurrent suicidal ideation without a specific plan, or a suicide attempt or a specific plan for committing suicide.",
+        "Recurrent thoughts of mortality (not just fear of dying), recurrent suicidal ideation without a specific plan, or a suicide attempt or a specific plan for committing suicide.",
+        "Recurrent thoughts of end of life (not just fear of dying), recurrent suicidal ideation without a specific plan, or a suicide attempt or a specific plan for committing suicide.",
+        "Recurrent thoughts of death (not just fear of dying), recurrent thoughts of suicide without a specific plan, or a suicide attempt or a specific plan for committing suicide.",
+        "Recurrent thoughts of death (not just fear of dying), recurrent thinking about suicide without a specific plan, or a suicide attempt or a specific plan for committing suicide.",
+        "Recurrent thoughts of death (not just fear of dying), recurrent suicidal thoughts without a specific plan, or a suicide attempt or a specific plan for committing suicide.",
+        "Recurrent thoughts of death (not just fear of dying), recurrent suicidal ideation without a specific plan, or a trying to end life or a specific plan for committing suicide.",
+        "Recurrent thoughts of death (not just fear of dying), recurrent suicidal ideation without a specific plan, or a self-harm attempt or a specific plan for committing suicide.",
+        "Recurrent thoughts of death (not just fear of dying), recurrent suicidal ideation without a specific plan, or a attempted suicide or a specific plan for committing suicide.",
+        "Recurrent thoughts of dying , recurrent suicidal ideation without a specific plan, or a suicide attempt or a specific plan for committing suicide."
+      ],
+      "count": 12
+    },
+    "A.10": {
+      "original": "Special case criterion for additional clinical considerations.",
+      "paraphrases": [
+        "Special case criterion for additional clinical considerations.",
+        "Does the person experience special case criterion for additional clinical considerations?",
+        "Is there evidence of special case criterion for additional clinical considerations?"
+      ],
+      "count": 3
+    }
+  },
+  "total_paraphrases": 111,
+  "avg_paraphrases_per_criterion": 11.1
+}

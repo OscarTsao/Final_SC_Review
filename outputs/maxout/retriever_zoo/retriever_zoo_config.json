@@ -1,0 +1,46 @@
+{
+  "retrievers": [
+    {
+      "name": "bge-m3",
+      "model_id": "BAAI/bge-m3",
+      "type": "hybrid"
+    },
+    {
+      "name": "bge-large-en-v1.5",
+      "model_id": "BAAI/bge-large-en-v1.5",
+      "type": "dense"
+    },
+    {
+      "name": "e5-large-v2",
+      "model_id": "intfloat/e5-large-v2",
+      "type": "dense"
+    },
+    {
+      "name": "gte-large-en-v1.5",
+      "model_id": "Alibaba-NLP/gte-large-en-v1.5",
+      "type": "dense"
+    },
+    {
+      "name": "stella-en-1.5B-v5",
+      "model_id": "dunzhang/stella_en_1.5B_v5",
+      "type": "dense"
+    },
+    {
+      "name": "bm25",
+      "model_id": "bm25",
+      "type": "lexical"
+    }
+  ],
+  "top_k_max": 800,
+  "oracle_ks": [
+    50,
+    100,
+    200,
+    400,
+    800
+  ],
+  "hw_config": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "vram_gb": 31.34844970703125
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "paraphrases_per_criterion": 12,
+  "min_paraphrases": 8,
+  "max_paraphrases": 20,
+  "allow_external_api": false,
+  "methods": [
+    "rule_based",
+    "synonym_replacement"
+  ]
+}

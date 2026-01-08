@@ -1,0 +1,20 @@
+{
+  "max_base_models": 30,
+  "cv_folds": 5,
+  "feature_sources": [
+    "retriever_dense_score",
+    "retriever_sparse_score",
+    "retriever_colbert_score",
+    "reranker_score",
+    "rrf_rank",
+    "sentence_position",
+    "sentence_length",
+    "criterion_overlap_tfidf"
+  ],
+  "meta_learners": [
+    "logistic_regression",
+    "xgboost",
+    "lightgbm"
+  ],
+  "nested_cv": true
+}

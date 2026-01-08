@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-01-09T00:31:17.148619",
+  "split": "val",
+  "n_queries": 50,
+  "baseline": {
+    "method": "pipeline_rrf",
+    "ndcg@10": 0.6557392976069376
+  },
+  "stacked": {
+    "method": "logistic_regression",
+    "cv_auc": 0.7612868374466313,
+    "ndcg@10": 0.680609818575939
+  },
+  "improvement": 0.02487052096900144,
+  "feature_importance": {
+    "fusion_score": 0.3774383926365509,
+    "rank_reciprocal": 0.6050294839606125,
+    "text_length": -0.018358732003093348,
+    "word_count": 0.3569121386844472,
+    "sentence_position": 0.05982368943200298,
+    "word_overlap_ratio": 0.07659362112830416
+  },
+  "decision_gate_D6": {
+    "improvement": 0.02487052096900144,
+    "threshold": 0.0,
+    "recommendation": "KEEP"
+  }
+}

@@ -1,0 +1,5 @@
+run_id,phase,stage,status,start_time,end_time,git_sha,config_path,output_dir,primary_metric,metric_value,notes
+baseline_stageE,baseline,E,completed,2026-01-08T21:03:20,2026-01-08T21:03:20,92acf736,configs/locked_best_stageE_deploy.yaml,outputs/final_test,nDCG@10,0.687,Paper baseline locked
+stageC_lora_hpo,training,C,completed,2026-01-08T20:00:00,2026-01-08T23:58:40,92acf736,configs/hpo_training_v2.yaml,outputs/hpo/sc_training_jina_lora,val_loss,0.216,50 trials completed
+stageB_inference_hpo,inference,B,completed,2026-01-08T12:00:00,2026-01-08T18:00:00,92acf736,configs/hpo_inference_exhaustive.yaml,outputs/hpo/sc_inference_exhaustive,nDCG@10,0.707,10k+ trials
+stageE_postprocess_hpo,postprocess,E,completed,2026-01-08T20:30:00,2026-01-08T21:03:20,92acf736,configs/locked_best_stageE_deploy.yaml,outputs/stageE/hpo,false_evidence_rate,0.0,RF classifier t=0.7
