@@ -1,0 +1,62 @@
+# FINAL TEST EVALUATION CONFIG - LOCKED
+# Generated: 2026-01-09 based on HPO results
+# DO NOT MODIFY - Use for final test evaluation only
+
+paths:
+  data_dir: data
+  groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
+  sentence_corpus: data/groundtruth/sentence_corpus.jsonl
+  cache_dir: data/cache/bge_m3
+
+models:
+  bge_m3: BAAI/bge-m3
+  jina_v3: jinaai/jina-reranker-v3
+  bge_query_max_length: 128
+  bge_passage_max_length: 256
+  bge_use_fp16: true
+  bge_batch_size: 64
+  reranker_max_length: 512
+  reranker_chunk_size: 64
+  reranker_dtype: auto
+  reranker_use_listwise: true
+
+# Best retriever params from HPO (sc_inference_maxout, 100 trials)
+retriever:
+  top_k_retriever: 32
+  top_k_colbert: 32
+  top_k_final: 10
+  use_sparse: true
+  use_colbert: false  # HPO found ColBERT not needed
+  dense_weight: 0.72
+  sparse_weight: 0.67
+  colbert_weight: 0.0
+  fusion_method: weighted_sum
+  score_normalization: zscore_per_query
+  rrf_k: 60
+  rebuild_cache: false
+
+# Postprocess params from Stage C HPO
+postprocessing:
+  classifier: gbm
+  threshold: 0.2
+
+split:
+  seed: 42
+  train_ratio: 0.6  # dev_tune
+  val_ratio: 0.2    # dev_select
+  test_ratio: 0.2   # test
+
+evaluation:
+  split: test
+  ks: [1, 5, 10]
+  skip_no_positives: false  # Include all queries for deployment metrics
+  save_query_csv: true
+
+# Metadata
+metadata:
+  created: "2026-01-09"
+  retriever_hpo_trials: 100
+  retriever_hpo_best_ndcg10: 0.70
+  reranker_training_loss: 0.787
+  postprocess_hpo_f1: 0.361
+  postprocess_hpo_auc: 0.734

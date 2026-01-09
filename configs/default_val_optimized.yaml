@@ -18,13 +18,14 @@ models:
 
 retriever:
   top_k_retriever: 50
+  top_k_rerank: 50  # Reranker input pool size
   top_k_colbert: 50
   top_k_final: 20
-  use_sparse: true
-  use_colbert: true
-  dense_weight: 0.6
-  sparse_weight: 0.2
-  colbert_weight: 0.2
+  use_sparse: false  # HPO found sparse less useful for this task
+  use_colbert: true  # ColBERT (multi-vector) helps
+  dense_weight: 0.78
+  sparse_weight: 0.0  # Disabled per HPO
+  colbert_weight: 0.56
   fusion_method: weighted_sum
   score_normalization: minmax_per_query
   rrf_k: 60
