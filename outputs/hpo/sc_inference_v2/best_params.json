@@ -1,9 +1,0 @@
-{
-  "top_k_retriever": 32,
-  "top_k_rerank": 32,
-  "top_k_final": 20,
-  "use_sparse": true,
-  "use_multiv": true,
-  "fusion_method": "rrf",
-  "score_normalization": "none"
-}

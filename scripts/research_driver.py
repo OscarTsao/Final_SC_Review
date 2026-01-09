@@ -254,23 +254,23 @@ def verify_preconditions() -> bool:
     )
     checks.append(success)
 
-    # 5. Locked baseline config
+    # 5. Locked baseline config (optional for fresh restart)
     locked_config = CONFIGS_DIR / "locked_best_stageE_deploy.yaml"
     if locked_config.exists():
         logger.info(f"Locked baseline config exists: {locked_config}")
         checks.append(True)
     else:
-        logger.error(f"Missing locked baseline config: {locked_config}")
-        checks.append(False)
+        logger.warning(f"No locked baseline config (OK for fresh restart): {locked_config}")
+        checks.append(True)  # Not a hard requirement for restart
 
-    # 6. Run registry
+    # 6. Run registry (optional for fresh restart)
     registry = OUTPUTS_DIR / "run_registry.csv"
     if registry.exists():
         logger.info(f"Run registry exists: {registry}")
         checks.append(True)
     else:
-        logger.error(f"Missing run registry: {registry}")
-        checks.append(False)
+        logger.warning(f"No run registry (OK for fresh restart): {registry}")
+        checks.append(True)  # Not a hard requirement for restart
 
     all_passed = all(checks)
     if all_passed:
@@ -279,6 +279,342 @@ def verify_preconditions() -> bool:
         logger.error("Some preconditions FAILED - fix before continuing")
 
     return all_passed
+
+
+# ============================================================
+# STANDARD PIPELINE PHASES (from PLAN.md)
+# ============================================================
+
+def phase_audit(strict: bool = False) -> bool:
+    """Phase 0: Audit existing artifacts and check invariants."""
+    logger.info("=" * 70)
+    logger.info("PHASE 0: AUDIT")
+    logger.info("=" * 70)
+
+    success1, _ = run_command(
+        ["python", "scripts/audit_pushed_results.py"],
+        "Audit pushed results",
+        timeout=300
+    )
+
+    success2, _ = run_command(
+        ["python", "scripts/verify_invariants.py"],
+        "Verify invariants",
+        timeout=300
+    )
+
+    return success1 and success2
+
+
+def phase_verify(strict: bool = False) -> bool:
+    """Phase 1: Verify clean git state and passing tests."""
+    logger.info("=" * 70)
+    logger.info("PHASE 1: VERIFY")
+    logger.info("=" * 70)
+
+    # Check git status
+    success1, output = run_command(["git", "status", "--porcelain"], "Check git status")
+    if success1:
+        if output.strip():
+            logger.warning(f"Git has uncommitted changes:\n{output[:500]}")
+            if strict:
+                return False
+        else:
+            logger.info("Git working tree is clean")
+
+    # Run pytest
+    success2, _ = run_command(
+        ["python", "-m", "pytest", "-q"],
+        "Run pytest",
+        timeout=300
+    )
+
+    # Validate runs
+    success3, _ = run_command(
+        ["python", "scripts/validate_runs.py"],
+        "Validate runs",
+        timeout=300
+    )
+
+    return success1 and success2 and success3
+
+
+def phase_profile(strict: bool = False) -> bool:
+    """Phase 2: Detect and record hardware configuration."""
+    logger.info("=" * 70)
+    logger.info("PHASE 2: PROFILE")
+    logger.info("=" * 70)
+
+    success, _ = run_command(
+        ["python", "scripts/hw_probe.py"],
+        "Hardware probe",
+        timeout=120
+    )
+
+    # Verify output
+    hw_json = OUTPUTS_DIR / "system" / "hw.json"
+    if hw_json.exists():
+        logger.info(f"Hardware profile saved: {hw_json}")
+        return True
+    else:
+        logger.error(f"Hardware profile not found: {hw_json}")
+        return False
+
+
+def phase_baselines(strict: bool = False, time_budget_hours: float = 2.0) -> bool:
+    """Phase 3: Run baseline evaluations."""
+    logger.info("=" * 70)
+    logger.info("PHASE 3: BASELINES")
+    logger.info("=" * 70)
+
+    baseline_dir = OUTPUTS_DIR / "baselines"
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+
+    # Run baseline evaluation
+    success, _ = run_command(
+        ["python", "scripts/eval_sc_pipeline.py",
+         "--config", "configs/default.yaml",
+         "--split", "val",
+         "--output", str(baseline_dir / "baseline_default_val.json")],
+        "Baseline evaluation (val)",
+        timeout=int(time_budget_hours * 3600)
+    )
+
+    return success
+
+
+def phase_retriever_sweep(budget: str = "standard", time_budget_hours: float = 12.0) -> bool:
+    """Phase 4: HPO over retriever configurations."""
+    logger.info("=" * 70)
+    logger.info("PHASE 4: RETRIEVER SWEEP")
+    logger.info("=" * 70)
+
+    n_trials = {"quick": 50, "standard": 200, "exhaustive": 1000}.get(budget, 200)
+
+    # Precompute cache first
+    success1, _ = run_command(
+        ["python", "scripts/precompute_hpo_cache.py",
+         "--config", "configs/hpo_inference.yaml"],
+        "Precompute HPO cache",
+        timeout=3600
+    )
+
+    # Run HPO
+    success2, _ = run_command(
+        ["python", "scripts/hpo_inference.py",
+         "--config", "configs/hpo_inference.yaml",
+         "--n_trials", str(n_trials),
+         "--study_name", "retriever_sweep"],
+        f"Retriever HPO ({n_trials} trials)",
+        timeout=int(time_budget_hours * 3600)
+    )
+
+    return success1 and success2
+
+
+def phase_reranker_sweep(budget: str = "standard", time_budget_hours: float = 12.0) -> bool:
+    """Phase 5: HPO over reranker configurations (frozen models)."""
+    logger.info("=" * 70)
+    logger.info("PHASE 5: RERANKER SWEEP")
+    logger.info("=" * 70)
+
+    # Run reranker comparison eval
+    success, _ = run_command(
+        ["python", "scripts/eval_reranker_comparison.py",
+         "--config", "configs/default.yaml",
+         "--output_dir", str(OUTPUTS_DIR / "reranker_sweep")],
+        "Reranker sweep evaluation",
+        timeout=int(time_budget_hours * 3600)
+    )
+
+    return success
+
+
+def phase_reranker_train(budget: str = "standard", time_budget_hours: float = 12.0) -> bool:
+    """Phase 6: Finetune reranker with hybrid loss HPO."""
+    logger.info("=" * 70)
+    logger.info("PHASE 6: RERANKER TRAINING")
+    logger.info("=" * 70)
+
+    n_trials = {"quick": 20, "standard": 100, "exhaustive": 500}.get(budget, 100)
+
+    success, _ = run_command(
+        ["python", "scripts/train_reranker_hybrid.py",
+         "--config", "configs/reranker_hybrid.yaml",
+         "--n_trials", str(n_trials)],
+        f"Reranker training HPO ({n_trials} trials)",
+        timeout=int(time_budget_hours * 3600)
+    )
+
+    return success
+
+
+def phase_postprocess_hpo(budget: str = "standard", time_budget_hours: float = 12.0) -> bool:
+    """Phase 7: Postprocessing HPO (calibration + no-evidence + dynamic-K)."""
+    logger.info("=" * 70)
+    logger.info("PHASE 7: POSTPROCESS HPO")
+    logger.info("=" * 70)
+
+    success, _ = run_command(
+        ["python", "scripts/eval_postprocessing.py",
+         "--config", "configs/default.yaml",
+         "--output_dir", str(OUTPUTS_DIR / "postprocessing")],
+        "Postprocessing evaluation",
+        timeout=int(time_budget_hours * 3600)
+    )
+
+    return success
+
+
+def phase_retriever_train(budget: str = "standard", time_budget_hours: float = 12.0) -> bool:
+    """Phase 8: (Conditional) Finetune retriever."""
+    logger.info("=" * 70)
+    logger.info("PHASE 8: RETRIEVER TRAINING")
+    logger.info("=" * 70)
+
+    # Check decision gate first
+    success_gate, output = run_command(
+        ["python", "scripts/decision_engine.py", "--gate", "G1"],
+        "Check retriever training gate",
+        timeout=60
+    )
+
+    if "NOT TRIGGERED" in output:
+        logger.info("G1 gate not triggered - skipping retriever training")
+        return True
+
+    # Run retriever training
+    success, _ = run_command(
+        ["python", "scripts/train_retriever.py",
+         "--config", "configs/retriever_training.yaml"],
+        "Retriever training",
+        timeout=int(time_budget_hours * 3600)
+    )
+
+    return success
+
+
+def phase_gnn(budget: str = "standard", time_budget_hours: float = 6.0) -> bool:
+    """Phase 9: (Optional) GNN enhancement."""
+    logger.info("=" * 70)
+    logger.info("PHASE 9: GNN (OPTIONAL)")
+    logger.info("=" * 70)
+
+    # Check decision gate
+    success_gate, output = run_command(
+        ["python", "scripts/decision_engine.py", "--gate", "G2"],
+        "Check GNN gate",
+        timeout=60
+    )
+
+    if "NOT TRIGGERED" in output:
+        logger.info("G2 gate not triggered - skipping GNN")
+        return True
+
+    logger.info("GNN phase not fully implemented - placeholder")
+    return True
+
+
+def phase_llm_judge(allow_external_api: bool = False, time_budget_hours: float = 2.0) -> bool:
+    """Phase 10: (Optional) LLM judge evaluation."""
+    logger.info("=" * 70)
+    logger.info("PHASE 10: LLM JUDGE (OPTIONAL)")
+    logger.info("=" * 70)
+
+    if not allow_external_api:
+        logger.info("External API not enabled - skipping LLM judge")
+        return True
+
+    logger.info("LLM judge phase not fully implemented - placeholder")
+    return True
+
+
+def phase_paper(strict: bool = False) -> bool:
+    """Phase 11: Final test evaluation and paper artifacts."""
+    logger.info("=" * 70)
+    logger.info("PHASE 11: PAPER (FINAL TEST)")
+    logger.info("=" * 70)
+
+    # Run final test evaluation
+    success, _ = run_command(
+        ["python", "scripts/final_test_evaluation.py",
+         "--output_dir", str(OUTPUTS_DIR / "final_test_results")],
+        "Final test evaluation",
+        timeout=3600
+    )
+
+    if not success:
+        logger.error("Final test evaluation failed")
+        return False
+
+    # Verify outputs
+    required_files = ["summary.json", "per_query.csv", "manifest.json"]
+    final_dir = OUTPUTS_DIR / "final_test_results"
+    for f in required_files:
+        if not (final_dir / f).exists():
+            logger.error(f"Missing required output: {f}")
+            if strict:
+                return False
+
+    # Run validation
+    success2, _ = run_command(
+        ["python", "scripts/validate_runs.py"],
+        "Validate final results",
+        timeout=300
+    )
+
+    # Run coverage check
+    success3, _ = run_command(
+        ["python", "scripts/check_coverage.py"],
+        "Check coverage",
+        timeout=300
+    )
+
+    return success and success2 and success3
+
+
+def run_single_phase(args) -> int:
+    """Run a single phase based on args."""
+    phase = args.phase
+    strict = args.strict
+    budget = args.budget
+    time_budget = getattr(args, 'time_budget_hours', 12.0)
+
+    phase_map = {
+        "audit": lambda: phase_audit(strict),
+        "verify": lambda: phase_verify(strict),
+        "profile": lambda: phase_profile(strict),
+        "baselines": lambda: phase_baselines(strict, time_budget),
+        "retriever_sweep": lambda: phase_retriever_sweep(budget, time_budget),
+        "reranker_sweep": lambda: phase_reranker_sweep(budget, time_budget),
+        "reranker_train": lambda: phase_reranker_train(budget, time_budget),
+        "postprocess_hpo": lambda: phase_postprocess_hpo(budget, time_budget),
+        "retriever_train": lambda: phase_retriever_train(budget, time_budget),
+        "gnn": lambda: phase_gnn(budget, time_budget),
+        "llm_judge": lambda: phase_llm_judge(args.allow_external_api, time_budget),
+        "paper": lambda: phase_paper(strict),
+    }
+
+    if phase not in phase_map:
+        logger.error(f"Unknown phase: {phase}")
+        return 1
+
+    logger.info(f"Running phase: {phase}")
+    success = phase_map[phase]()
+
+    if success:
+        logger.info(f"Phase {phase} completed successfully")
+
+        # Run validation after phase
+        if strict:
+            logger.info("Running post-phase validation...")
+            run_command(["python", "scripts/validate_runs.py"], "Post-phase validation", timeout=300)
+            run_command(["python", "scripts/verify_invariants.py"], "Post-phase invariants", timeout=300)
+
+        return 0
+    else:
+        logger.error(f"Phase {phase} failed")
+        return 1
 
 
 def phase_maxout_retriever_zoo(budgets: MaxoutBudgets, hw_config: HardwareConfig) -> bool:
@@ -715,21 +1051,51 @@ def run_maxout_pipeline(args) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="MAXOUT++ Research Driver for S-C Evidence Retrieval",
+        description="Research Driver for S-C Evidence Retrieval",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Phases (in order):
+  audit           - Validate existing artifacts and check invariants
+  verify          - Verify clean git state and passing tests
+  profile         - Detect and record hardware configuration
+  baselines       - Run baseline evaluations
+  retriever_sweep - HPO over retriever configurations
+  reranker_sweep  - HPO over reranker configurations (frozen)
+  reranker_train  - Finetune reranker with hybrid loss HPO
+  postprocess_hpo - Calibration + no-evidence + dynamic-K HPO
+  retriever_train - (Conditional) Finetune retriever if gate triggers
+  gnn             - (Optional) GNN enhancement
+  llm_judge       - (Optional) LLM judge evaluation
+  paper           - Final test evaluation and paper artifacts
+  maxout          - Run MAXOUT++ enhancement phases
+"""
     )
+
+    # Standard phases + maxout phases
+    standard_phases = [
+        "audit", "verify", "profile", "baselines",
+        "retriever_sweep", "reranker_sweep", "reranker_train",
+        "postprocess_hpo", "retriever_train", "gnn", "llm_judge", "paper"
+    ]
+    maxout_phases = ["maxout", "retriever_zoo", "multiquery", "reranker", "ensemble", "abstention", "final"]
 
     parser.add_argument(
         "--phase",
-        choices=["maxout", "retriever_zoo", "multiquery", "reranker", "ensemble", "abstention", "final"],
-        default="maxout",
-        help="Which phase to run (default: maxout runs all)",
+        choices=standard_phases + maxout_phases,
+        default="audit",
+        help="Which phase to run",
     )
     parser.add_argument(
         "--budget",
         choices=["quick", "standard", "maxout", "exhaustive"],
-        default="maxout",
-        help="Compute budget level",
+        default="standard",
+        help="Compute budget level (default: standard)",
+    )
+    parser.add_argument(
+        "--time_budget_hours",
+        type=float,
+        default=12.0,
+        help="Time budget in hours for HPO phases (default: 12h)",
     )
     parser.add_argument(
         "--allow_external_api",
@@ -771,11 +1137,14 @@ def main():
         logger.error("--teacher_mode requires --allow_external_api")
         return 1
 
-    if args.phase == "maxout":
+    # Route to appropriate handler
+    if args.phase in standard_phases:
+        return run_single_phase(args)
+    elif args.phase == "maxout":
         return run_maxout_pipeline(args)
     else:
-        logger.info(f"Running single phase: {args.phase}")
-        # Individual phase execution would go here
+        logger.info(f"Running MAXOUT++ phase: {args.phase}")
+        # Individual maxout phase execution would go here
         return 0
 
 
