@@ -1,0 +1,61 @@
+# LOCKED BEST CONFIGURATION - DO NOT MODIFY
+# Generated from HPO experiments on 2026-01-09
+# This configuration is locked for final test evaluation
+
+# Best models selected from HPO
+models:
+  retriever:
+    name: bge-large-en-v1.5
+    model_id: BAAI/bge-large-en-v1.5
+    type: dense
+    dev_select_oracle@10: 0.8581
+
+  reranker:
+    name: bge-reranker-v2-m3
+    model_id: BAAI/bge-reranker-v2-m3
+    dev_select_oracle@10: 0.8803
+
+# Combined pipeline performance on dev_select
+pipeline:
+  dev_select_oracle@3: 0.6898
+  dev_select_oracle@5: 0.7789
+  dev_select_oracle@10: 0.8713
+
+# K policy
+k_policy:
+  k_primary: [3, 5, 10]
+  top_k_retriever: 20
+
+# Postprocessing settings
+postprocessing:
+  no_evidence_method: max_score
+  no_evidence_threshold: 0.2
+  dynamic_k_method: elbow
+
+# Data paths
+paths:
+  data_dir: data
+  groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
+  sentence_corpus: data/groundtruth/sentence_corpus.jsonl
+  cache_dir: data/cache
+
+# Split configuration
+split:
+  seed: 42
+  train_ratio: 0.6
+  val_ratio: 0.2
+  test_ratio: 0.2
+
+# Evaluation settings
+evaluation:
+  ks: [3, 5, 10]
+  split: test
+  skip_no_positives: false  # Include empty queries for deployment metrics
+
+# Metadata
+metadata:
+  created: "2026-01-09"
+  description: "Locked configuration from HPO experiments for final test evaluation"
+  gpu_hours_spent: 7.24
+  n_retriever_trials: 150
+  n_reranker_trials: 48

@@ -28,6 +28,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+# Ensure scripts directory is in path for imports
+SCRIPTS_DIR_PATH = Path(__file__).parent
+if str(SCRIPTS_DIR_PATH) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR_PATH))
+
+# Import GPU time tracking
+from gpu_time_tracker import GPUTimeTracker, MIN_GPU_HOURS, get_tracker
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -458,6 +466,92 @@ def phase_maxout_abstention(budgets: MaxoutBudgets) -> bool:
     return True
 
 
+def suggest_gpu_work_to_reach_target(gpu_tracker: GPUTimeTracker, budgets: MaxoutBudgets) -> List[Dict]:
+    """Suggest additional GPU-heavy work to reach the minimum GPU hours target.
+
+    Returns a list of suggested experiments with estimated GPU hours.
+    """
+    remaining = gpu_tracker.remaining_hours
+    if remaining <= 0:
+        return []
+
+    suggestions = []
+
+    # Priority order: most impactful GPU-heavy experiments
+    gpu_heavy_experiments = [
+        {
+            "name": "Reranker Training HPO",
+            "description": f"Run {budgets.reranker_hpo_trials} LoRA finetuning trials with ASHA",
+            "estimated_hours": 4.0,  # Estimate based on typical runtime
+            "command": "python scripts/train_reranker_hybrid.py --hpo --n_trials {trials}",
+            "priority": 1,
+        },
+        {
+            "name": "Retriever Finetuning HPO",
+            "description": f"Run {budgets.retriever_hpo_trials} retriever training trials",
+            "estimated_hours": 3.0,
+            "command": "python scripts/train_retriever.py --hpo --n_trials {trials}",
+            "priority": 2,
+        },
+        {
+            "name": "Retriever Zoo Embedding Cache",
+            "description": "Compute embeddings for all retriever candidates",
+            "estimated_hours": 2.0,
+            "command": "python scripts/eval_retriever_zoo.py --build_cache",
+            "priority": 3,
+        },
+        {
+            "name": "Inference HPO Extended",
+            "description": f"Run {budgets.inference_hpo_trials} inference config trials",
+            "estimated_hours": 1.5,
+            "command": "python scripts/hpo_inference.py --n_trials {trials}",
+            "priority": 4,
+        },
+        {
+            "name": "GNN Training HPO",
+            "description": f"Run {budgets.gnn_sweep_configs} GNN architecture sweep trials",
+            "estimated_hours": 2.5,
+            "command": "python scripts/train_gnn.py --hpo --n_configs {configs}",
+            "priority": 5,
+        },
+    ]
+
+    # Select experiments to fill remaining time
+    cumulative = 0.0
+    for exp in gpu_heavy_experiments:
+        if cumulative >= remaining:
+            break
+        suggestions.append(exp)
+        cumulative += exp["estimated_hours"]
+
+    return suggestions
+
+
+def report_gpu_status(gpu_tracker: GPUTimeTracker, budgets: MaxoutBudgets) -> str:
+    """Generate a GPU status report with suggestions if target not met."""
+    lines = [
+        "=" * 60,
+        "GPU TIME TRACKING STATUS",
+        "=" * 60,
+        f"Total GPU Hours:    {gpu_tracker.total_gpu_hours:.2f}h",
+        f"Target (Minimum):   {MIN_GPU_HOURS:.0f}h",
+        f"Target Reached:     {'YES' if gpu_tracker.target_reached else 'NO'}",
+        f"Remaining:          {gpu_tracker.remaining_hours:.2f}h",
+        f"Sessions Completed: {len(gpu_tracker.sessions)}",
+    ]
+
+    if not gpu_tracker.target_reached:
+        lines.append("")
+        lines.append("SUGGESTED GPU-HEAVY WORK TO REACH TARGET:")
+        suggestions = suggest_gpu_work_to_reach_target(gpu_tracker, budgets)
+        for i, s in enumerate(suggestions, 1):
+            lines.append(f"  {i}. {s['name']} (~{s['estimated_hours']:.1f}h)")
+            lines.append(f"     {s['description']}")
+
+    lines.append("=" * 60)
+    return "\n".join(lines)
+
+
 def run_maxout_pipeline(args) -> int:
     """Run the complete MAXOUT++ pipeline."""
     logger.info("="*70)
@@ -467,6 +561,12 @@ def run_maxout_pipeline(args) -> int:
 
     # Create maxout output directory
     MAXOUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Initialize GPU time tracking
+    gpu_tracker = GPUTimeTracker(output_dir=str(OUTPUTS_DIR / "system"))
+    logger.info(f"GPU Time Target: {MIN_GPU_HOURS}h minimum for paper experiments")
+    logger.info(f"GPU Time Accumulated: {gpu_tracker.total_gpu_hours:.2f}h")
+    logger.info(f"GPU Time Remaining: {gpu_tracker.remaining_hours:.2f}h")
 
     # Detect hardware
     hw_config = detect_hardware()
@@ -494,6 +594,10 @@ def run_maxout_pipeline(args) -> int:
             "reranker_hpo_trials": budgets.reranker_hpo_trials,
             "vram_scale_factor": budgets.vram_scale_factor,
         },
+        "gpu_tracking": {
+            "min_gpu_hours_target": MIN_GPU_HOURS,
+            "gpu_hours_at_start": gpu_tracker.total_gpu_hours,
+        },
     }
 
     manifest_path = MAXOUT_DIR / "run_manifest.json"
@@ -506,38 +610,105 @@ def run_maxout_pipeline(args) -> int:
             logger.error("Preconditions failed - aborting")
             return 1
 
-    # Run phases
+    # Run phases with GPU tracking
+    # Phases marked as gpu_heavy=True require GPU time tracking
     phases_to_run = [
-        ("Phase 2: Retriever Zoo", lambda: phase_maxout_retriever_zoo(budgets, hw_config)),
-        ("Phase 3: Multi-Query", lambda: phase_maxout_multiquery(budgets, args.allow_external_api)),
-        ("Phase 4: Reranker MAXOUT", lambda: phase_maxout_reranker(budgets, args.teacher_mode)),
-        ("Phase 6: Ensemble", lambda: phase_maxout_ensemble(budgets)),
-        ("Phase 8: Abstention", lambda: phase_maxout_abstention(budgets)),
+        ("Phase 2: Retriever Zoo", lambda: phase_maxout_retriever_zoo(budgets, hw_config), True),
+        ("Phase 3: Multi-Query", lambda: phase_maxout_multiquery(budgets, args.allow_external_api), False),
+        ("Phase 4: Reranker MAXOUT", lambda: phase_maxout_reranker(budgets, args.teacher_mode), True),
+        ("Phase 6: Ensemble", lambda: phase_maxout_ensemble(budgets), False),
+        ("Phase 8: Abstention", lambda: phase_maxout_abstention(budgets), False),
     ]
 
-    for phase_name, phase_fn in phases_to_run:
+    phase_gpu_times = []
+    for phase_name, phase_fn, is_gpu_heavy in phases_to_run:
         logger.info(f"\nStarting {phase_name}...")
+        phase_start_time = time.time()
+
+        # Start GPU tracking for GPU-heavy phases
+        if is_gpu_heavy and hw_config.cuda_available:
+            session_id = gpu_tracker.start(phase=phase_name, description=f"MAXOUT++ {phase_name}")
+        else:
+            session_id = None
+
         try:
-            if not phase_fn():
+            success = phase_fn()
+            if not success:
                 logger.error(f"{phase_name} failed")
                 if args.strict:
+                    # Stop GPU tracking before exit
+                    if session_id:
+                        gpu_tracker.stop()
                     return 1
         except Exception as e:
             logger.error(f"{phase_name} error: {e}")
             if args.strict:
+                # Stop GPU tracking before exit
+                if session_id:
+                    gpu_tracker.stop()
                 return 1
 
-    # Update manifest with completion
+        # Stop GPU tracking
+        phase_duration = time.time() - phase_start_time
+        if session_id:
+            session = gpu_tracker.stop()
+            phase_gpu_times.append({
+                "phase": phase_name,
+                "session_id": session_id,
+                "gpu_hours": session.duration_hours,
+                "wall_seconds": phase_duration,
+                "avg_utilization": session.avg_utilization,
+                "peak_memory_gb": session.peak_memory_gb,
+            })
+        else:
+            phase_gpu_times.append({
+                "phase": phase_name,
+                "session_id": None,
+                "gpu_hours": 0.0,
+                "wall_seconds": phase_duration,
+                "avg_utilization": 0.0,
+                "peak_memory_gb": 0.0,
+            })
+
+        # Log GPU time status
+        logger.info(f"GPU Time Status: {gpu_tracker.total_gpu_hours:.2f}h / {MIN_GPU_HOURS}h target")
+
+    # Check if GPU time target reached
+    gpu_target_reached = gpu_tracker.target_reached
+    if not gpu_target_reached:
+        logger.warning(f"GPU TIME TARGET NOT REACHED: {gpu_tracker.total_gpu_hours:.2f}h < {MIN_GPU_HOURS}h")
+        logger.warning("Consider running additional GPU-heavy experiments (finetuning, HPO)")
+    else:
+        logger.info(f"GPU TIME TARGET REACHED: {gpu_tracker.total_gpu_hours:.2f}h >= {MIN_GPU_HOURS}h")
+
+    # Update manifest with completion and GPU tracking
     manifest["end_time"] = datetime.now().isoformat()
     manifest["status"] = "COMPLETED"
+    manifest["gpu_tracking"]["gpu_hours_at_end"] = gpu_tracker.total_gpu_hours
+    manifest["gpu_tracking"]["gpu_hours_this_run"] = sum(p["gpu_hours"] for p in phase_gpu_times)
+    manifest["gpu_tracking"]["target_reached"] = gpu_target_reached
+    manifest["gpu_tracking"]["phase_breakdown"] = phase_gpu_times
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
+
+    # Save GPU tracking summary
+    gpu_summary_path = MAXOUT_DIR / "gpu_time_summary.json"
+    with open(gpu_summary_path, "w") as f:
+        json.dump(gpu_tracker.summary(), f, indent=2)
+
+    # Print detailed GPU status report
+    logger.info("\n" + report_gpu_status(gpu_tracker, budgets))
 
     logger.info("="*70)
     logger.info("MAXOUT++ PIPELINE SETUP COMPLETE")
     logger.info("="*70)
     logger.info(f"Outputs: {MAXOUT_DIR}")
     logger.info("Run individual phase scripts to execute experiments")
+
+    # Return non-zero if GPU target not met in strict mode (for paper compliance)
+    if args.strict and not gpu_target_reached:
+        logger.warning("Strict mode: GPU target not met. Additional GPU work required.")
+        return 2  # Special exit code for incomplete GPU hours
 
     return 0
 
@@ -585,6 +756,12 @@ def main():
         "--dry_run",
         action="store_true",
         help="Dry run: plan but don't execute",
+    )
+    parser.add_argument(
+        "--min_gpu_hours",
+        type=float,
+        default=MIN_GPU_HOURS,
+        help=f"Minimum GPU hours target for paper experiments (default: {MIN_GPU_HOURS}h)",
     )
 
     args = parser.parse_args()

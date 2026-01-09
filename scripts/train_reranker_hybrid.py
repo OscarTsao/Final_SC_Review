@@ -5,9 +5,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import yaml
+
+# Add scripts directory to path for GPU tracker import
+SCRIPTS_DIR = Path(__file__).parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from gpu_time_tracker import GPUTimeTracker
 
 from final_sc_review.data.io import load_criteria, load_groundtruth
 from final_sc_review.data.splits import split_post_ids
@@ -78,13 +86,38 @@ def main() -> None:
     )
 
     trainer = HybridRerankerTrainer(train_cfg)
-    trainer.train(train_dataset, val_dataset)
+
+    # Initialize GPU time tracking
+    gpu_tracker = GPUTimeTracker(output_dir="outputs/system")
+    session_id = gpu_tracker.start(
+        phase="reranker_training",
+        description=f"Training {cfg['models']['jina_v3']} with hybrid loss"
+    )
+
+    try:
+        trainer.train(train_dataset, val_dataset)
+    finally:
+        # Always stop GPU tracking
+        session = gpu_tracker.stop()
+        logger.info(f"GPU training time: {session.duration_hours:.2f}h")
+        logger.info(f"Total GPU hours: {gpu_tracker.total_gpu_hours:.2f}h")
 
     # Save split metadata for reproducibility
     out_dir = Path(cfg["paths"]["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "split_post_ids.json", "w", encoding="utf-8") as f:
         json.dump(splits, f, indent=2)
+
+    # Save GPU tracking info to output directory
+    with open(out_dir / "gpu_tracking.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "session_id": session_id,
+            "duration_hours": session.duration_hours,
+            "duration_seconds": session.duration_seconds,
+            "avg_utilization": session.avg_utilization,
+            "peak_memory_gb": session.peak_memory_gb,
+            "total_gpu_hours": gpu_tracker.total_gpu_hours,
+        }, f, indent=2)
 
     logger.info("Training complete; model saved to %s", out_dir)
 

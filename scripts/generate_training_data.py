@@ -56,25 +56,34 @@ def main() -> None:
             continue
         grouped.setdefault((row.post_id, row.criterion_id), []).append(row)
 
-    # Prepare batch for mining
+    # Prepare batch for mining - INCLUDE EMPTY GROUPS for no-evidence learning
     batch = []
+    empty_batch = []  # Separate list for empty (no-evidence) groups
     for (post_id, criterion_id), rows in sorted(grouped.items()):
         query = criteria_map.get(criterion_id)
         if query is None:
             continue
         gold_ids = [r.sent_uid for r in rows if r.groundtruth == 1]
-        if not gold_ids:
-            continue
-        batch.append(
-            {
-                "query": query,
-                "post_id": post_id,
-                "criterion_id": criterion_id,
-                "gold_ids": gold_ids,
-            }
-        )
+        group_data = {
+            "query": query,
+            "post_id": post_id,
+            "criterion_id": criterion_id,
+            "gold_ids": gold_ids,
+            "has_evidence": len(gold_ids) > 0,  # Track has_evidence flag
+        }
+        if gold_ids:
+            batch.append(group_data)
+        else:
+            empty_batch.append(group_data)
 
-    logger.info("Prepared %d queries for training data generation", len(batch))
+    logger.info("Prepared %d queries with positives for training", len(batch))
+    logger.info("Prepared %d empty queries (no evidence) for training", len(empty_batch))
+
+    # Include empty groups in training for no-evidence detection
+    include_empty = cfg.get("include_empty_groups", True)
+    if include_empty:
+        batch.extend(empty_batch)
+        logger.info("Total training queries (with empty): %d", len(batch))
 
     # Initialize retriever for hard negative mining
     hard_neg_cfg = cfg.get("hard_negative", {})
@@ -136,8 +145,13 @@ def main() -> None:
     logger.info("Saved training data to %s", output_path)
 
     # Save statistics
+    num_with_evidence = sum(1 for b in batch if b.get("has_evidence", True))
+    num_empty = sum(1 for b in batch if not b.get("has_evidence", True))
     stats = {
         "num_queries": len(batch),
+        "num_queries_with_evidence": num_with_evidence,
+        "num_queries_empty": num_empty,
+        "empty_included": include_empty,
         "num_examples": len(examples),
         "hard_negative_enabled": hard_neg_cfg.get("enabled", False),
         "hard_negative_method": hard_neg_cfg.get("method", "none"),

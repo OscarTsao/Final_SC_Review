@@ -184,10 +184,73 @@ reranker_zoo:
       lora_compatible: true
       priority: 3
 
-# Decision gates configuration
+# ============================================================================
+# PAPER-GRADE DECISION GATES
+# Comprehensive gating framework for retriever finetuning decisions
+# ============================================================================
+
 decision_gates:
+  # Gate 0: Data integrity check (must pass before any finetuning)
+  # If Oracle@ALL < threshold on DEV positives → fix data first
+  gate_0_data_integrity:
+    oracle_at_all_threshold: 0.99
+    action_if_below: "fix_sentence_alignment_or_segmentation"
+    description: "Gold must be present when including all sentences"
+
+  # Gate 1: Can we just rerank everything cheaply?
+  # If K_budget >= L_p95 → no retriever finetuning needed for recall
+  gate_1_rerank_all:
+    # K_budget: max candidates to pass to reranker (compute budget)
+    k_budget: 10
+    # L_p95 threshold: if median post has <= this many sentences, rerank all
+    l_p95_threshold: 30
+    action_if_budget_covers: "skip_retriever_finetune_focus_on_reranker"
+    description: "Reranker can score all sentences for most posts"
+
+  # Gate 2: Retrieval bottleneck under real compute budget
+  # Only relevant if K_budget < L_p95
+  gate_2_retrieval_bottleneck:
+    # Oracle@K_budget thresholds
+    oracle_threshold_high: 0.97   # No finetune if >= this
+    oracle_threshold_mid: 0.92    # Try cheaper fixes first
+    oracle_threshold_low: 0.92    # Finetune if < this
+    actions:
+      above_high: "skip_retriever_finetune"
+      mid_range: "try_cheaper_fixes_first"  # increase K, improve fusion
+      below_low: "retriever_finetuning_recommended"
+
+  # Gate 3: End-to-end sensitivity check (most decisive)
+  # Compare DeployF1(ALL) vs DeployF1(K_budget)
+  gate_3_e2e_sensitivity:
+    # Gap threshold in absolute F1 points
+    deploy_f1_gap_threshold: 1.0
+    action_if_gap_large: "retrieval_is_bottleneck"
+    action_if_gap_small: "retriever_not_main_bottleneck"
+    description: "Would a perfect retriever help?"
+
+  # Gate 4: Empty-heavy deployment risk (critical for high-empty datasets)
+  gate_4_empty_fpr:
+    # Acceptable FPR increase tolerance
+    empty_fpr_tolerance: 0.005  # 0.5% absolute
+    action_if_fpr_increases: "retriever_finetune_harmful_without_recalibration"
+    description: "Retriever changes must not worsen empty-post handling"
+
+  # Combined decision rule (paper-defensible):
+  # Finetune retriever IFF:
+  #   1. Gate 0 passes (Oracle@ALL >= 0.99), AND
+  #   2. Either:
+  #      a. K_budget < L_p95 AND Oracle@K_budget < 0.92, OR
+  #      b. DeployF1(ALL) - DeployF1(K_budget) >= 1.0
+  #   3. After retuning postprocess, EmptyFPR does not worsen beyond tolerance
+  combined_rule:
+    require_gate_0_pass: true
+    require_gate_1_or_gate_2: true
+    require_gate_4_pass: true
+
+# Legacy gates (retained for backward compatibility)
+decision_gates_legacy:
   D2_retriever_ceiling:
-    oracle_recall_200_threshold: 0.97
+    oracle_recall_20_threshold: 0.85
     action_if_below: "retriever_finetuning_required"
 
   D3_multiquery:

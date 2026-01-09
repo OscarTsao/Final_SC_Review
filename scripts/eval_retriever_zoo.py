@@ -25,6 +25,7 @@ from final_sc_review.data.io import load_groundtruth, load_sentence_corpus, load
 from final_sc_review.data.splits import split_post_ids
 from final_sc_review.data.schemas import Sentence
 from final_sc_review.retriever.zoo import RetrieverZoo, RetrieverConfig
+from final_sc_review.metrics.k_policy import get_paper_k_values, compute_k_eff, K_PRIMARY
 
 
 def build_queries_from_groundtruth(
@@ -184,8 +185,10 @@ def main():
 
     # Evaluate each retriever
     results = {}
-    oracle_recall_ks = config.get("evaluation", {}).get("oracle_recall_ks", [50, 100, 200, 400, 800])
-    ranking_ks = config.get("evaluation", {}).get("ranking_ks", [1, 5, 10, 20])
+    # Use paper-standard K values for oracle recall (not misleading high K like 200)
+    oracle_recall_ks = config.get("evaluation", {}).get("oracle_recall_ks", get_paper_k_values() + [50, 100])
+    # Use paper-standard K values for ranking metrics
+    ranking_ks = config.get("evaluation", {}).get("ranking_ks", get_paper_k_values())
 
     for name in retriever_names:
         print(f"\n{'='*60}")
@@ -229,8 +232,8 @@ def main():
             "queries_evaluated": len(queries_with_positives),
         }
 
-        # Print summary
-        print(f"Oracle Recall@200: {oracle_recalls.get('oracle_recall@200', 0):.4f}")
+        # Print summary using paper-standard K=20 (not misleading K=200)
+        print(f"Oracle Recall@20: {oracle_recalls.get('oracle_recall@20', 0):.4f}")
         print(f"nDCG@10: {ranking_metrics.get('ndcg@10', 0):.4f}")
         print(f"MRR@10: {ranking_metrics.get('mrr@10', 0):.4f}")
 
@@ -250,7 +253,8 @@ def main():
     print(f"{'='*60}")
 
     # Print leaderboard
-    print(f"\n{'Retriever':<25} {'Oracle@200':<12} {'nDCG@10':<10} {'MRR@10':<10}")
+    # Use paper-standard K=20 for decision gate (not misleading K=200)
+    print(f"\n{'Retriever':<25} {'Oracle@20':<12} {'nDCG@10':<10} {'MRR@10':<10}")
     print("-" * 60)
 
     leaderboard = []
@@ -258,7 +262,7 @@ def main():
         if "error" in res:
             print(f"{name:<25} ERROR: {res['error'][:30]}")
         else:
-            oracle = res["oracle_recalls"].get("oracle_recall@200", 0)
+            oracle = res["oracle_recalls"].get("oracle_recall@20", 0)
             ndcg = res["ranking_metrics"].get("ndcg@10", 0)
             mrr = res["ranking_metrics"].get("mrr@10", 0)
             print(f"{name:<25} {oracle:<12.4f} {ndcg:<10.4f} {mrr:<10.4f}")
@@ -267,7 +271,7 @@ def main():
     # Sort by oracle recall
     leaderboard.sort(key=lambda x: x[1], reverse=True)
 
-    print(f"\nTop 3 by Oracle Recall@200:")
+    print(f"\nTop 3 by Oracle Recall@20:")
     for i, (name, oracle, ndcg, mrr) in enumerate(leaderboard[:3], 1):
         print(f"  {i}. {name}: {oracle:.4f}")
 
@@ -279,24 +283,27 @@ def main():
         f.write(f"**Split**: {args.split}\n")
         f.write(f"**Queries with positives**: {len(queries_with_positives)}\n\n")
 
-        f.write("## Leaderboard\n\n")
-        f.write("| Retriever | Oracle@200 | nDCG@10 | MRR@10 |\n")
-        f.write("|-----------|------------|---------|--------|\n")
+        f.write("## Leaderboard (Paper-Standard K Values)\n\n")
+        f.write("| Retriever | Oracle@20 | nDCG@10 | MRR@10 |\n")
+        f.write("|-----------|-----------|---------|--------|\n")
         for name, oracle, ndcg, mrr in leaderboard:
             f.write(f"| {name} | {oracle:.4f} | {ndcg:.4f} | {mrr:.4f} |\n")
 
-        f.write("\n## Decision Gate D2\n\n")
+        f.write("\n## Decision Gate D2 (Using Paper-Standard K=20)\n\n")
         best_oracle = leaderboard[0][1] if leaderboard else 0
-        if best_oracle >= 0.97:
-            f.write(f"Best Oracle@200 = {best_oracle:.4f} >= 0.97\n")
+        # Threshold for Oracle@20 is lower than Oracle@200 since K is smaller
+        # With median=7 sentences per post, Oracle@20 threshold should be ~0.85
+        oracle_threshold = 0.85
+        if best_oracle >= oracle_threshold:
+            f.write(f"Best Oracle@20 = {best_oracle:.4f} >= {oracle_threshold}\n")
             f.write("**Decision**: Retriever finetuning is OPTIONAL\n")
         else:
-            f.write(f"Best Oracle@200 = {best_oracle:.4f} < 0.97\n")
-            f.write("**Decision**: Retriever finetuning is RECOMMENDED\n")
+            f.write(f"Best Oracle@20 = {best_oracle:.4f} < {oracle_threshold}\n")
+            f.write("**Decision**: Retriever finetuning is REQUIRED\n")
 
         f.write("\n## Top 3 Retrievers (Promoted)\n\n")
         for i, (name, oracle, ndcg, mrr) in enumerate(leaderboard[:3], 1):
-            f.write(f"{i}. **{name}**: Oracle@200={oracle:.4f}, nDCG@10={ndcg:.4f}\n")
+            f.write(f"{i}. **{name}**: Oracle@20={oracle:.4f}, nDCG@10={ndcg:.4f}\n")
 
     print(f"\nResults saved to: {results_path}")
     print(f"Report saved to: {report_path}")

@@ -52,9 +52,11 @@ evaluation:
 # HPO Results: RF classifier with threshold 0.7 achieves 0% false evidence rate
 postprocessing:
   # No-evidence detection (90.5% empty prevalence requires abstention)
+  # NOTE: rf_classifier model not yet trained; using combined method as fallback
+  # To use RF: train with hpo_postprocessing.py --method rf_classifier --save_model
   no_evidence_detector:
-    method: rf_classifier  # HPO best: 0% false evidence, 100% empty recall
-    threshold: 0.7
+    method: combined  # Fallback until RF model is trained
+    threshold: 0.5
     features:
       - max_score
       - std_score

@@ -1,0 +1,38 @@
+{
+  "model_name": "e5-large-v2",
+  "model_id": "intfloat/e5-large-v2",
+  "training_mode": "full",
+  "best_trial": {
+    "trial": 31,
+    "params": {
+      "learning_rate": 2.7204207943746063e-05,
+      "warmup_ratio": 0.04605513196408774,
+      "weight_decay": 0.043084845157216285,
+      "temperature": 0.04863242900661515,
+      "max_length": 256,
+      "hard_neg_count": 3,
+      "batch_size": 4,
+      "num_epochs": 7
+    },
+    "value": 0.9962779156327544
+  },
+  "dev_select_metrics": {
+    "n_positive": 303,
+    "n_empty": 2647,
+    "oracle@3": 0.6732673267326733,
+    "oracle@5": 0.7491749174917491,
+    "oracle@10": 0.858085808580858,
+    "recall@3": 0.6453245324532453,
+    "recall@5": 0.7321782178217822,
+    "recall@10": 0.8500000000000001,
+    "ndcg@3": 0.5554490693546102,
+    "ndcg@5": 0.5923421500234262,
+    "ndcg@10": 0.6315245418218849,
+    "mrr@3": 0.5357535753575356,
+    "mrr@5": 0.5524202420242024,
+    "mrr@10": 0.5665618942846665
+  },
+  "n_trials_total": 36,
+  "gpu_hours": 2.5616626070605384,
+  "timestamp": "2026-01-09T05:53:28.640941"
+}

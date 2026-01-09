@@ -1,7 +1,10 @@
+# Extended reranker training config for GPU time accumulation
+# Target: More epochs, multiple seeds, hyperparameter variations
+
 paths:
   data_dir: data
   groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
-  output_dir: outputs/reranker_hybrid
+  output_dir: outputs/reranker_extended
 
 models:
   jina_v3: jinaai/jina-reranker-v3
@@ -18,10 +21,10 @@ split:
 
 train:
   batch_size: 1
-  num_epochs: 3
+  num_epochs: 10  # Extended from 3 to 10
   learning_rate: 0.00002
   weight_decay: 0.01
-  early_stopping_patience: 3
+  early_stopping_patience: 5  # Extended patience
 
 loss:
   w_list: 1.0

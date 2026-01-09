@@ -1,0 +1,93 @@
+# Model Lists for Paper Experiments
+# Following R5: Each retriever gets HPO tuning, then best retriever used for reranker HPO
+
+retrievers_to_tune:
+  # Primary candidates - will be finetuned via contrastive learning
+  - name: bge-m3
+    model_id: BAAI/bge-m3
+    type: hybrid
+    training_mode: full  # 34GB VRAM allows full finetune
+    priority: 1
+
+  - name: bge-large-en-v1.5
+    model_id: BAAI/bge-large-en-v1.5
+    type: dense
+    training_mode: full
+    priority: 2
+
+  - name: e5-large-v2
+    model_id: intfloat/e5-large-v2
+    type: dense
+    training_mode: full
+    priority: 3
+
+  - name: gte-large-en-v1.5
+    model_id: Alibaba-NLP/gte-large-en-v1.5
+    type: dense
+    training_mode: lora
+    trust_remote_code: true
+    priority: 4
+
+  # Lexical baseline (no training, inference only)
+  - name: bm25
+    model_id: bm25
+    type: lexical
+    training_mode: none
+    priority: 5
+
+rerankers_to_tune:
+  # Primary candidates - will be finetuned with hybrid loss
+  - name: jina-reranker-v3
+    model_id: jinaai/jina-reranker-v3
+    training_mode: lora  # Large model, use LoRA
+    max_length: 512
+    priority: 1
+
+  - name: bge-reranker-v2-m3
+    model_id: BAAI/bge-reranker-v2-m3
+    training_mode: full
+    max_length: 512
+    priority: 2
+
+  - name: mxbai-rerank-large-v1
+    model_id: mixedbread-ai/mxbai-rerank-large-v1
+    training_mode: lora
+    max_length: 512
+    priority: 3
+
+# Training hyperparameter search spaces
+retriever_hpo:
+  n_trials_screen: 30
+  n_trials_full: 10
+  top_k_promote: 0.2  # Promote top 20% to full budget
+
+  search_space:
+    learning_rate: [1e-6, 1e-4]  # log uniform
+    warmup_ratio: [0.0, 0.2]
+    weight_decay: [0.0, 0.1]
+    temperature: [0.02, 0.1]
+    max_length: [128, 256, 384]
+    hard_neg_count: [1, 3, 5, 7]
+    num_epochs: [3, 5, 10]
+    batch_size: [8, 16, 32]
+
+reranker_hpo:
+  n_trials_screen: 50
+  n_trials_full: 10
+  top_k_promote: 0.2
+
+  search_space:
+    learning_rate: [1e-6, 5e-5]
+    warmup_ratio: [0.0, 0.2]
+    weight_decay: [0.0, 0.1]
+    max_length: [256, 384, 512]
+    list_size: [4, 8, 16]
+    loss_mode: [pointwise, pairwise, listwise, hybrid]
+    num_epochs: [3, 5, 10]
+    batch_size: [1, 2, 4]
+
+# K policy per R3
+k_policy:
+  k_primary: [3, 5, 10]
+  k_optional: [1]
+  k_ceiling: all  # Sanity check only

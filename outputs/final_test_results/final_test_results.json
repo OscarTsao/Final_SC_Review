@@ -1,0 +1,29 @@
+{
+  "n_queries": 2960,
+  "n_positive": 270,
+  "n_empty": 2690,
+  "empty_prevalence": 0.9087837837837838,
+  "retriever_oracle@3": 0.7444444444444445,
+  "retriever_oracle@5": 0.8296296296296296,
+  "retriever_oracle@10": 0.9185185185185185,
+  "oracle@3": 0.7185185185185186,
+  "oracle@5": 0.8407407407407408,
+  "oracle@10": 0.9185185185185185,
+  "recall@3": 0.6864197530864197,
+  "recall@5": 0.8248148148148148,
+  "recall@10": 0.908395061728395,
+  "ndcg@3": 0.5950973695147663,
+  "ndcg@5": 0.6540623538664986,
+  "ndcg@10": 0.6826908068834987,
+  "mrr@3": 0.578395061728395,
+  "mrr@5": 0.6061728395061728,
+  "mrr@10": 0.6171325690770135,
+  "config": {
+    "retriever": "bge-large-en-v1.5",
+    "reranker": "bge-reranker-v2-m3",
+    "retriever_model_id": "BAAI/bge-large-en-v1.5",
+    "reranker_model_id": "BAAI/bge-reranker-v2-m3"
+  },
+  "timestamp": "2026-01-09T12:27:51.898160",
+  "split": "test"
+}

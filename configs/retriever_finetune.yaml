@@ -1,0 +1,22 @@
+# Retriever finetuning configuration
+# Uses contrastive learning with in-batch negatives
+
+model_name: BAAI/bge-m3
+output_dir: outputs/retriever_finetuned
+
+# Training parameters
+max_length: 256
+batch_size: 16
+num_epochs: 10
+learning_rate: 2e-5
+warmup_ratio: 0.1
+weight_decay: 0.01
+temperature: 0.05
+
+# Hard negative mining
+hard_neg_count: 5
+
+# Other
+seed: 42
+use_fp16: true
+gradient_checkpointing: true
