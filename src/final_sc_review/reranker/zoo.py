@@ -170,6 +170,15 @@ class CrossEncoderReranker(BaseReranker):
 
         # Set model to inference mode (disables dropout)
         self.model.model.train(False)
+
+        # Optional: torch.compile for faster inference (PyTorch 2.0+)
+        try:
+            import torch._dynamo
+            self.model.model = torch.compile(self.model.model, mode="reduce-overhead")
+            logger.debug("Applied torch.compile for faster inference")
+        except Exception:
+            pass  # torch.compile not available or failed
+
         logger.info(f"  Loaded {self.config.name} with dtype={dtype}")
 
     def rerank(
@@ -430,7 +439,7 @@ class RerankerZoo:
             model_id="jinaai/jina-reranker-v2-base-multilingual",
             reranker_type="cross-encoder",
             max_length=1024,
-            batch_size=32,
+            batch_size=48,  # Increased for better GPU utilization
             trust_remote_code=True,
         ),
         # mxbai-rerank-base-v1
@@ -439,7 +448,7 @@ class RerankerZoo:
             model_id="mixedbread-ai/mxbai-rerank-base-v1",
             reranker_type="cross-encoder",
             max_length=512,
-            batch_size=32,
+            batch_size=64,  # Increased for better GPU utilization
         ),
         # mxbai-rerank-large-v1
         RerankerConfig(
@@ -447,7 +456,7 @@ class RerankerZoo:
             model_id="mixedbread-ai/mxbai-rerank-large-v1",
             reranker_type="cross-encoder",
             max_length=512,
-            batch_size=16,
+            batch_size=32,  # Increased for better GPU utilization
         ),
         # Qwen3-Reranker-0.6B (instruction-aware)
         RerankerConfig(
@@ -476,7 +485,7 @@ class RerankerZoo:
             model_id="BAAI/bge-reranker-v2-m3",
             reranker_type="cross-encoder",
             max_length=512,
-            batch_size=32,
+            batch_size=64,  # Increased for better GPU utilization
         ),
         # BGE-reranker-v2.5-gemma2-lightweight
         RerankerConfig(
@@ -493,7 +502,7 @@ class RerankerZoo:
             model_id="cross-encoder/ms-marco-MiniLM-L-12-v2",
             reranker_type="cross-encoder",
             max_length=512,
-            batch_size=64,
+            batch_size=128,  # Increased for better GPU utilization (small model)
         ),
     ]
 
