@@ -433,6 +433,16 @@ class RerankerZoo:
     # Default reranker configurations from research plan
     DEFAULT_RERANKERS = [
         # === SOTA-class open rerankers ===
+        # jina-reranker-v3 (listwise, very strong BEIR claim)
+        RerankerConfig(
+            name="jina-reranker-v3",
+            model_id="jinaai/jina-reranker-v3",
+            reranker_type="listwise",
+            max_length=8192,
+            batch_size=32,
+            listwise_max_docs=64,
+            trust_remote_code=True,
+        ),
         # jina-reranker-v2 (multilingual, strong)
         RerankerConfig(
             name="jina-reranker-v2",
@@ -442,7 +452,23 @@ class RerankerZoo:
             batch_size=48,  # Increased for better GPU utilization
             trust_remote_code=True,
         ),
-        # mxbai-rerank-base-v1
+        # mxbai-rerank-base-v2 (fast strong open baseline)
+        RerankerConfig(
+            name="mxbai-rerank-base-v2",
+            model_id="mixedbread-ai/mxbai-rerank-base-v2",
+            reranker_type="cross-encoder",
+            max_length=512,
+            batch_size=64,
+        ),
+        # mxbai-rerank-large-v2 (quality push)
+        RerankerConfig(
+            name="mxbai-rerank-large-v2",
+            model_id="mixedbread-ai/mxbai-rerank-large-v2",
+            reranker_type="cross-encoder",
+            max_length=512,
+            batch_size=32,
+        ),
+        # mxbai-rerank-base-v1 (legacy)
         RerankerConfig(
             name="mxbai-rerank-base-v1",
             model_id="mixedbread-ai/mxbai-rerank-base-v1",
@@ -450,7 +476,7 @@ class RerankerZoo:
             max_length=512,
             batch_size=64,  # Increased for better GPU utilization
         ),
-        # mxbai-rerank-large-v1
+        # mxbai-rerank-large-v1 (legacy)
         RerankerConfig(
             name="mxbai-rerank-large-v1",
             model_id="mixedbread-ai/mxbai-rerank-large-v1",

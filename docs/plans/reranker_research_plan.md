@@ -338,3 +338,47 @@ outputs/reranker_research/
 - BGE reranker docs: https://bge-model.com/tutorial/5_Reranking/5.2.html
 
 ---
+
+## 16) Implementation Tracking
+
+### 16.1 Models in Zoo (Available for Testing)
+
+| Model | Model ID | Type | Status |
+|-------|----------|------|--------|
+| **jina-reranker-v3** | jinaai/jina-reranker-v3 | listwise | Pending |
+| **jina-reranker-v2** | jinaai/jina-reranker-v2-base-multilingual | cross-encoder | Tested |
+| **mxbai-rerank-base-v2** | mixedbread-ai/mxbai-rerank-base-v2 | cross-encoder | Pending |
+| **mxbai-rerank-large-v2** | mixedbread-ai/mxbai-rerank-large-v2 | cross-encoder | Pending |
+| **mxbai-rerank-base-v1** | mixedbread-ai/mxbai-rerank-base-v1 | cross-encoder | Tested |
+| **mxbai-rerank-large-v1** | mixedbread-ai/mxbai-rerank-large-v1 | cross-encoder | Available |
+| **qwen3-reranker-0.6b** | Qwen/Qwen3-Reranker-0.6B | cross-encoder | Pending |
+| **qwen3-reranker-4b** | Qwen/Qwen3-Reranker-4B | cross-encoder | Pending |
+| **bge-reranker-v2-m3** | BAAI/bge-reranker-v2-m3 | cross-encoder | Tested + HPO |
+| **bge-reranker-gemma2-lightweight** | BAAI/bge-reranker-v2.5-gemma2-lightweight | lightweight | Available |
+| **ms-marco-minilm** | cross-encoder/ms-marco-MiniLM-L-12-v2 | cross-encoder | Tested |
+
+### 16.2 R0 Off-the-Shelf Results (dev_select, K=20)
+
+| Rank | Model | nDCG@10 | MRR@10 | Recall@10 | Notes |
+|------|-------|---------|--------|-----------|-------|
+| 1 | **bge-reranker-v2-m3** | **0.6962** | 0.6331 | 0.8871 | Best overall |
+| 2 | jina-reranker-v2 | 0.6940 | 0.6314 | 0.8769 | Close second |
+| 3 | ms-marco-minilm | 0.6571 | 0.5827 | 0.8871 | Fastest baseline |
+| 4 | mxbai-rerank-base-v1 | 0.6412 | 0.5648 | 0.8731 | DeBERTa-v3 |
+
+### 16.3 HPO Results (Tier A: Inference-Only)
+
+**BGE-reranker-v2-m3** (30 trials):
+- Best nDCG@10: 0.6962
+- Best params: `top_k_rerank=20, max_length=384, score_threshold=4.7`
+- False evidence rate: 0%
+
+### 16.4 Priority Queue for Next Experiments
+
+1. **jina-reranker-v3** - Listwise architecture, strong BEIR claims
+2. **qwen3-reranker-0.6b** - Fast, instruction-aware, family match with retriever
+3. **mxbai-rerank-base-v2** - Updated v2, fast strong baseline
+4. **qwen3-reranker-4b** - Quality push, fits on 5090 with tuned batch/length
+5. **mxbai-rerank-large-v2** - Quality push, Apache-2.0
+
+---
