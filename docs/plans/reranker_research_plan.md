@@ -345,40 +345,100 @@ outputs/reranker_research/
 
 | Model | Model ID | Type | Status |
 |-------|----------|------|--------|
-| **jina-reranker-v3** | jinaai/jina-reranker-v3 | listwise | Pending |
-| **jina-reranker-v2** | jinaai/jina-reranker-v2-base-multilingual | cross-encoder | Tested |
-| **mxbai-rerank-base-v2** | mixedbread-ai/mxbai-rerank-base-v2 | cross-encoder | Pending |
-| **mxbai-rerank-large-v2** | mixedbread-ai/mxbai-rerank-large-v2 | cross-encoder | Pending |
-| **mxbai-rerank-base-v1** | mixedbread-ai/mxbai-rerank-base-v1 | cross-encoder | Tested |
+| **jina-reranker-v3** | jinaai/jina-reranker-v3 | listwise | ✅ Tested (R0) |
+| **jina-reranker-v2** | jinaai/jina-reranker-v2-base-multilingual | cross-encoder | ✅ Tested + HPO ⭐ |
+| **mxbai-rerank-base-v2** | mixedbread-ai/mxbai-rerank-base-v2 | cross-encoder | ✅ Tested (R0) |
+| **mxbai-rerank-large-v2** | mixedbread-ai/mxbai-rerank-large-v2 | cross-encoder | ✅ Tested (R0) |
+| **mxbai-rerank-base-v1** | mixedbread-ai/mxbai-rerank-base-v1 | cross-encoder | ✅ Tested (R0) |
 | **mxbai-rerank-large-v1** | mixedbread-ai/mxbai-rerank-large-v1 | cross-encoder | Available |
-| **qwen3-reranker-0.6b** | Qwen/Qwen3-Reranker-0.6B | cross-encoder | Pending |
-| **qwen3-reranker-4b** | Qwen/Qwen3-Reranker-4B | cross-encoder | Pending |
-| **bge-reranker-v2-m3** | BAAI/bge-reranker-v2-m3 | cross-encoder | Tested + HPO |
+| **qwen3-reranker-0.6b** | Qwen/Qwen3-Reranker-0.6B | listwise | ✅ Tested (R0) |
+| **qwen3-reranker-4b** | Qwen/Qwen3-Reranker-4B | listwise | ✅ Tested (R0) |
+| **bge-reranker-v2-m3** | BAAI/bge-reranker-v2-m3 | cross-encoder | ✅ Tested + HPO |
 | **bge-reranker-gemma2-lightweight** | BAAI/bge-reranker-v2.5-gemma2-lightweight | lightweight | Available |
-| **ms-marco-minilm** | cross-encoder/ms-marco-MiniLM-L-12-v2 | cross-encoder | Tested |
+| **ms-marco-minilm** | cross-encoder/ms-marco-MiniLM-L-12-v2 | cross-encoder | ✅ Tested (R0) |
 
-### 16.2 R0 Off-the-Shelf Results (dev_select, K=20)
+### 16.2 R0 Off-the-Shelf Results (dev_select, fusion-rrf, K=20)
 
-| Rank | Model | nDCG@10 | MRR@10 | Recall@10 | Notes |
-|------|-------|---------|--------|-----------|-------|
-| 1 | **bge-reranker-v2-m3** | **0.6962** | 0.6331 | 0.8871 | Best overall |
-| 2 | jina-reranker-v2 | 0.6940 | 0.6314 | 0.8769 | Close second |
-| 3 | ms-marco-minilm | 0.6571 | 0.5827 | 0.8871 | Fastest baseline |
-| 4 | mxbai-rerank-base-v1 | 0.6412 | 0.5648 | 0.8731 | DeBERTa-v3 |
+| Rank | Model | nDCG@10 | MRR@10 | Recall@10 | FalseEvid | Notes |
+|------|-------|---------|--------|-----------|-----------|-------|
+| 1 | **bge-reranker-v2-m3** | **0.6962** | 0.6331 | 0.8871 | 0.00 | Best overall |
+| 2 | jina-reranker-v2 | 0.6940 | 0.6314 | 0.8769 | — | Close second |
+| 3 | ms-marco-minilm | 0.6571 | 0.5827 | 0.8871 | — | Fastest baseline |
+| 4 | mxbai-rerank-base-v1 | 0.6412 | 0.5648 | 0.8731 | — | DeBERTa-v3 |
+| 5 | jina-reranker-v3 | 0.5236 | 0.4270 | 0.8165 | 0.86 | Listwise, high false-evid |
+| 6 | qwen3-reranker-4b | 0.5118 | 0.4149 | 0.8169 | 0.98 | High false-evid |
+| 7 | qwen3-reranker-0.6b | 0.4966 | 0.3964 | — | 0.75 | High false-evid |
+| 8 | mxbai-rerank-large-v2 | 0.4917 | 0.3853 | — | 1.00 | All queries return evidence |
+| 9 | mxbai-rerank-base-v2 | 0.4795 | 0.3846 | 0.7693 | 1.00 | All queries return evidence |
+
+**Key Observations (2026-01-10):**
+- **bge-reranker-v2-m3 remains the clear winner** with nDCG@10=0.6962 and 0% false evidence
+- **New models (v2/v3 series) underperform on this domain** despite strong BEIR claims
+- **False evidence rate is critical:** mxbai-v2 and qwen3 models return evidence for nearly all queries
+- **Listwise rerankers (jina-v3, qwen3)** need calibration/thresholding to work in this domain
+- **Cross-encoder baselines (bge, jina-v2, minilm)** better calibrated out-of-box
 
 ### 16.3 HPO Results (Tier A: Inference-Only)
 
-**BGE-reranker-v2-m3** (30 trials):
-- Best nDCG@10: 0.6962
-- Best params: `top_k_rerank=20, max_length=384, score_threshold=4.7`
+| Model | Best nDCG@10 | MRR@10 | Recall@10 | FalseEvid | Best Params |
+|-------|--------------|--------|-----------|-----------|-------------|
+| **jina-reranker-v2** | **0.6968** | 0.6346 | 0.8899 | 0.00 | K=10, len=1024, thresh=1.53 |
+| bge-reranker-v2-m3 | 0.6962 | 0.6331 | 0.8871 | 0.00 | K=20, len=384, thresh=4.7 |
+
+**Key Finding (2026-01-10):** After HPO, **jina-reranker-v2 beats bge-reranker-v2-m3** by +0.06% nDCG@10!
+- Optimal K is smaller (10 vs 20) - focusing on top candidates improves precision
+- Both achieve 0% false evidence rate with proper thresholding
+- jina-v2 achieves slightly better Recall@10 (0.8899 vs 0.8871)
+
+### 16.4 Summary: Best Reranker Configuration
+
+**Production recommendation: jina-reranker-v2**
+```yaml
+reranker:
+  model: jinaai/jina-reranker-v2-base-multilingual
+  top_k_rerank: 10
+  max_length: 1024
+  score_threshold: 1.53
+```
+
+Expected metrics (dev_select):
+- nDCG@10: 0.6968
+- MRR@10: 0.6346
+- Recall@10: 0.8899
 - False evidence rate: 0%
 
-### 16.4 Priority Queue for Next Experiments
+### 16.5 Inference Optimization (Implemented 2026-01-10)
 
-1. **jina-reranker-v3** - Listwise architecture, strong BEIR claims
-2. **qwen3-reranker-0.6b** - Fast, instruction-aware, family match with retriever
-3. **mxbai-rerank-base-v2** - Updated v2, fast strong baseline
-4. **qwen3-reranker-4b** - Quality push, fits on 5090 with tuned batch/length
-5. **mxbai-rerank-large-v2** - Quality push, Apache-2.0
+**Optimized inference module:** `src/final_sc_review/reranker/optimized_inference.py`
+
+Implements:
+1. **Multi-query batch processing** - Process N queries in single forward pass
+2. **Length bucketing** - Group sequences by similar lengths to minimize padding
+3. **Prefetching dataloader** - Prepare next batch while GPU is processing
+4. **Score caching** - Cache results for HPO speedup
+
+**Benchmark results (jina-reranker-v2, 200 queries, K=20):**
+
+| Method | Throughput | Speedup |
+|--------|------------|---------|
+| Baseline (sequential) | 1,863 pairs/sec | 1.0x |
+| Optimized (bs=48, bucketing) | 4,258 pairs/sec | 2.3x |
+| **Optimized (bs=96, bucketing)** | **5,045 pairs/sec** | **2.7x** |
+| Optimized (bs=48, no bucket) | 4,404 pairs/sec | 2.4x |
+
+**Usage:**
+```python
+from final_sc_review.reranker.optimized_inference import BatchReranker, QueryCandidates
+
+batch_reranker = BatchReranker(zoo, "jina-reranker-v2")
+results = batch_reranker.rerank_batch(queries, batch_size=96, use_bucketing=True)
+```
+
+### 16.6 Next Steps
+
+1. **Train fine-tuned rerankers (R1-R4)** - Domain adaptation may push beyond 0.70
+2. **Calibration experiments** - Add threshold tuning for high false-evidence models
+3. **Test bge-reranker-gemma2-lightweight** - Potential speed/quality tradeoff
+4. **Integrate optimized inference into HPO** - Use BatchReranker for faster HPO trials
 
 ---

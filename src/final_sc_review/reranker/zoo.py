@@ -171,13 +171,8 @@ class CrossEncoderReranker(BaseReranker):
         # Set model to inference mode (disables dropout)
         self.model.model.train(False)
 
-        # Optional: torch.compile for faster inference (PyTorch 2.0+)
-        try:
-            import torch._dynamo
-            self.model.model = torch.compile(self.model.model, mode="reduce-overhead")
-            logger.debug("Applied torch.compile for faster inference")
-        except Exception:
-            pass  # torch.compile not available or failed
+        # Disabled torch.compile - causes overhead with dynamic shapes
+        # For consistent batch inference, enable manually if needed
 
         logger.info(f"  Loaded {self.config.name} with dtype={dtype}")
 
@@ -252,6 +247,9 @@ class ListwiseReranker(BaseReranker):
             self.config.model_id,
             trust_remote_code=self.config.trust_remote_code,
         )
+        # Ensure pad_token is set (required for batched inference)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
         # Use optimal dtype (BF16 if supported, else FP16)
         dtype = get_optimal_dtype() if self.config.use_fp16 else torch.float32
@@ -266,6 +264,9 @@ class ListwiseReranker(BaseReranker):
             self.config.model_id,
             **model_kwargs,
         )
+        # Set pad_token_id on model config (required for batched inference)
+        if self.model.config.pad_token_id is None:
+            self.model.config.pad_token_id = self.tokenizer.pad_token_id
         self.model.to(self.device)
         # Set to inference mode (disables dropout)
         self.model.train(False)
@@ -308,12 +309,19 @@ class ListwiseReranker(BaseReranker):
 
             with torch.no_grad():
                 outputs = self.model(**inputs)
-                scores = outputs.logits.squeeze(-1).cpu().numpy()
+                logits = outputs.logits.float().cpu().numpy()
+                # Handle different output shapes
+                if logits.ndim == 1:
+                    scores = logits.tolist()
+                elif logits.ndim == 2 and logits.shape[1] == 1:
+                    scores = logits.squeeze(-1).tolist()
+                else:
+                    # Multi-class or unexpected shape - take first column
+                    scores = logits[:, 0].tolist()
 
-            if scores.ndim == 0:
+            # Ensure scores is a flat list
+            if not isinstance(scores, list):
                 scores = [float(scores)]
-            else:
-                scores = scores.tolist()
 
             all_scores.extend(scores)
 
@@ -433,14 +441,14 @@ class RerankerZoo:
     # Default reranker configurations from research plan
     DEFAULT_RERANKERS = [
         # === SOTA-class open rerankers ===
-        # jina-reranker-v3 (listwise, very strong BEIR claim)
+        # jina-reranker-v3 (strong BEIR, Qwen3-based)
         RerankerConfig(
             name="jina-reranker-v3",
             model_id="jinaai/jina-reranker-v3",
-            reranker_type="listwise",
-            max_length=8192,
+            reranker_type="listwise",  # Uses custom tokenizer handling
+            max_length=1024,
             batch_size=32,
-            listwise_max_docs=64,
+            listwise_max_docs=32,
             trust_remote_code=True,
         ),
         # jina-reranker-v2 (multilingual, strong)
@@ -484,23 +492,25 @@ class RerankerZoo:
             max_length=512,
             batch_size=32,  # Increased for better GPU utilization
         ),
-        # Qwen3-Reranker-0.6B (instruction-aware)
+        # Qwen3-Reranker-0.6B (instruction-aware, Qwen3-based)
         RerankerConfig(
             name="qwen3-reranker-0.6b",
             model_id="Qwen/Qwen3-Reranker-0.6B",
-            reranker_type="cross-encoder",
-            max_length=8192,
+            reranker_type="listwise",  # Uses custom tokenizer handling
+            max_length=1024,
             batch_size=16,
+            listwise_max_docs=32,
             trust_remote_code=True,
             query_instruction="Instruct: Given a criterion, determine if the passage provides supporting evidence.\nQuery: ",
         ),
-        # Qwen3-Reranker-4B
+        # Qwen3-Reranker-4B (instruction-aware, Qwen3-based)
         RerankerConfig(
             name="qwen3-reranker-4b",
             model_id="Qwen/Qwen3-Reranker-4B",
-            reranker_type="cross-encoder",
-            max_length=8192,
-            batch_size=4,
+            reranker_type="listwise",  # Uses custom tokenizer handling
+            max_length=1024,
+            batch_size=8,
+            listwise_max_docs=16,
             trust_remote_code=True,
             query_instruction="Instruct: Given a criterion, determine if the passage provides supporting evidence.\nQuery: ",
         ),
