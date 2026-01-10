@@ -45,7 +45,7 @@ class RetrieverConfig:
     """Configuration for a retriever in the zoo."""
     name: str
     model_id: str
-    retriever_type: str  # "hybrid", "dense", "lexical", "sparse"
+    retriever_type: str  # "hybrid", "dense", "lexical", "sparse", "late_interaction"
     max_length: int = 512
     batch_size: int = 64
     use_fp16: bool = True
@@ -54,6 +54,9 @@ class RetrieverConfig:
     passage_prefix: str = ""
     normalize: bool = True
     min_vram_gb: float = 0.0
+    trust_remote_code: bool = False  # For models with custom code (GTE, Qwen, etc.)
+    use_4bit: bool = False  # Enable 4-bit quantization for large models
+    use_bf16: bool = True  # Use BF16 with FP16 fallback (AMP-style)
 
 
 class BaseRetriever(ABC):
@@ -98,6 +101,46 @@ class BaseRetriever(ABC):
         return hashlib.sha256(config_str.encode()).hexdigest()[:8]
 
 
+def _patch_dynamic_cache_compat():
+    """Patch DynamicCache for backward compatibility with older model code.
+
+    Some models like NV-Embed-v2 use the deprecated `get_usable_length` method
+    which was removed in newer transformers versions. This adds it back.
+    Also fixes `from_legacy_cache(None)` returning None instead of empty cache.
+    """
+    try:
+        from transformers.cache_utils import DynamicCache
+
+        # Patch 1: Add missing get_usable_length method
+        if not hasattr(DynamicCache, 'get_usable_length'):
+            def get_usable_length(self, new_seq_length: int) -> int:
+                """Return the sequence length of the cached states."""
+                # In older versions, this returned min(self.get_seq_length(), new_seq_length)
+                # but for most use cases, get_seq_length() is what we need
+                return self.get_seq_length()
+
+            DynamicCache.get_usable_length = get_usable_length
+            logger.debug("Patched DynamicCache.get_usable_length for backward compatibility")
+
+        # Patch 2: Fix from_legacy_cache(None) returning None
+        # Older model code expects an empty DynamicCache, not None
+        _original_from_legacy_cache = DynamicCache.from_legacy_cache
+
+        @classmethod
+        def _patched_from_legacy_cache(cls, past_key_values):
+            if past_key_values is None:
+                return cls()  # Return empty DynamicCache
+            return _original_from_legacy_cache.__func__(cls, past_key_values)
+
+        if not getattr(DynamicCache, '_patched_from_legacy', False):
+            DynamicCache.from_legacy_cache = _patched_from_legacy_cache
+            DynamicCache._patched_from_legacy = True
+            logger.debug("Patched DynamicCache.from_legacy_cache for None handling")
+
+    except ImportError:
+        pass  # transformers not installed
+
+
 class DenseRetriever(BaseRetriever):
     """Dense embedding retriever using HuggingFace sentence-transformers."""
 
@@ -118,6 +161,9 @@ class DenseRetriever(BaseRetriever):
         if self.model is not None:
             return
 
+        # Apply DynamicCache compatibility patch before loading (for NV-Embed-v2, etc.)
+        _patch_dynamic_cache_compat()
+
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:
@@ -125,8 +171,43 @@ class DenseRetriever(BaseRetriever):
                 "sentence-transformers is required. Install with: pip install sentence-transformers"
             )
 
+        import torch
+
         logger.info(f"Loading dense model: {self.config.model_id}")
-        self.model = SentenceTransformer(self.config.model_id, device=self.device)
+
+        # Determine dtype: prefer BF16, fallback to FP16
+        model_kwargs = {}
+        if self.config.use_bf16:
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                model_kwargs["torch_dtype"] = torch.bfloat16
+                logger.info("  Using BF16 precision")
+            elif self.config.use_fp16:
+                model_kwargs["torch_dtype"] = torch.float16
+                logger.info("  BF16 not supported, using FP16 fallback")
+
+        # Handle 4-bit quantization for large models (only if BF16/FP16 not enough)
+        if self.config.use_4bit:
+            try:
+                from transformers import BitsAndBytesConfig
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4",
+                )
+                logger.info("  Using 4-bit quantization")
+            except ImportError:
+                logger.warning("bitsandbytes not available, loading without quantization")
+
+        if self.config.trust_remote_code:
+            model_kwargs["trust_remote_code"] = True
+
+        self.model = SentenceTransformer(
+            self.config.model_id,
+            device=self.device,
+            model_kwargs=model_kwargs if model_kwargs else None,
+            trust_remote_code=self.config.trust_remote_code,
+        )
 
     def encode_corpus(self, rebuild: bool = False) -> None:
         """Encode and cache corpus embeddings."""
@@ -374,6 +455,276 @@ class BGEM3ZooRetriever(BaseRetriever):
         return results
 
 
+class ColBERTv2Retriever(BaseRetriever):
+    """ColBERTv2 late-interaction retriever.
+
+    Uses token-level embeddings with MaxSim scoring for fine-grained matching.
+    Higher quality but more expensive than single-vector methods.
+    """
+
+    def __init__(
+        self,
+        config: RetrieverConfig,
+        sentences: List[Sentence],
+        cache_dir: Path,
+        device: Optional[str] = None,
+    ):
+        super().__init__(config, sentences, cache_dir)
+        self.device = device or "cuda"
+        self.model = None
+        self.doc_embeddings: Optional[List[np.ndarray]] = None
+
+    def _load_model(self):
+        """Lazy load ColBERTv2 model."""
+        if self.model is not None:
+            return
+
+        try:
+            from colbert.infra import ColBERTConfig
+            from colbert.modeling.checkpoint import Checkpoint
+        except ImportError:
+            raise ImportError(
+                "ColBERT is required. Install with: pip install colbert-ai"
+            )
+
+        logger.info(f"Loading ColBERTv2 model: {self.config.model_id}")
+        colbert_config = ColBERTConfig(
+            doc_maxlen=self.config.max_length,
+            query_maxlen=128,
+        )
+        self.model = Checkpoint(self.config.model_id, colbert_config)
+
+    def encode_corpus(self, rebuild: bool = False) -> None:
+        """Encode and cache corpus embeddings (per-document token embeddings)."""
+        cache_path = self.cache_dir / "colbert_doc_embs.pkl"
+        fingerprint_path = self.cache_dir / "fingerprint.json"
+
+        if not rebuild and cache_path.exists() and fingerprint_path.exists():
+            with open(fingerprint_path) as f:
+                meta = json.load(f)
+            if (meta.get("corpus") == self._corpus_fingerprint() and
+                meta.get("config") == self._config_fingerprint()):
+                logger.info(f"Loading cached ColBERTv2 embeddings from {cache_path}")
+                with open(cache_path, "rb") as f:
+                    self.doc_embeddings = pickle.load(f)
+                return
+
+        self._load_model()
+        texts = [sent.text for sent in self.sentences]
+
+        logger.info(f"Encoding {len(texts)} documents with ColBERTv2")
+        self.doc_embeddings = []
+        batch_size = self.config.batch_size
+
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            # ColBERTv2 returns per-token embeddings
+            embs = self.model.docFromText(batch)
+            for emb in embs:
+                self.doc_embeddings.append(emb.cpu().numpy())
+
+            if (i + batch_size) % 1000 == 0:
+                logger.info(f"  Encoded {min(i + batch_size, len(texts))}/{len(texts)}")
+
+        with open(cache_path, "wb") as f:
+            pickle.dump(self.doc_embeddings, f)
+        with open(fingerprint_path, "w") as f:
+            json.dump({
+                "corpus": self._corpus_fingerprint(),
+                "config": self._config_fingerprint(),
+                "model_id": self.config.model_id,
+                "num_sentences": len(self.sentences),
+            }, f, indent=2)
+
+    def retrieve_within_post(
+        self,
+        query: str,
+        post_id: str,
+        top_k: int = 100,
+    ) -> List[RetrievalResult]:
+        """Retrieve using ColBERTv2 MaxSim scoring."""
+        if self.doc_embeddings is None:
+            self.encode_corpus()
+
+        indices = self.post_to_indices.get(post_id, [])
+        if not indices:
+            return []
+
+        self._load_model()
+
+        # Encode query
+        query_emb = self.model.queryFromText([query])[0].cpu().numpy()  # [num_query_tokens, dim]
+
+        # Compute MaxSim scores
+        scores = []
+        for idx in indices:
+            doc_emb = self.doc_embeddings[idx]  # [num_doc_tokens, dim]
+            # MaxSim: for each query token, find max similarity with any doc token
+            sim_matrix = query_emb @ doc_emb.T  # [num_query_tokens, num_doc_tokens]
+            maxsim = sim_matrix.max(axis=1).sum()  # Sum of max similarities
+            scores.append(maxsim)
+
+        # Rank and return
+        ranked = sorted(zip(indices, scores), key=lambda x: -x[1])[:top_k]
+        results = []
+        for idx, score in ranked:
+            sent = self.sentences[idx]
+            results.append(RetrievalResult(
+                sent_uid=sent.sent_uid,
+                text=sent.text,
+                score=float(score),
+                component_scores={"colbertv2_maxsim": float(score)},
+            ))
+        return results
+
+
+class SPLADERetriever(BaseRetriever):
+    """SPLADE sparse neural retriever.
+
+    Produces sparse lexical-semantic embeddings with learned term expansion.
+    Combines benefits of lexical (BM25) and neural methods.
+    """
+
+    def __init__(
+        self,
+        config: RetrieverConfig,
+        sentences: List[Sentence],
+        cache_dir: Path,
+        device: Optional[str] = None,
+    ):
+        super().__init__(config, sentences, cache_dir)
+        self.device = device or "cuda"
+        self.model = None
+        self.tokenizer = None
+        self.doc_embeddings: Optional[List[Dict[int, float]]] = None
+
+    def _load_model(self):
+        """Lazy load SPLADE model."""
+        if self.model is not None:
+            return
+
+        try:
+            from transformers import AutoModelForMaskedLM, AutoTokenizer
+            import torch
+        except ImportError:
+            raise ImportError(
+                "transformers and torch are required for SPLADE"
+            )
+
+        logger.info(f"Loading SPLADE model: {self.config.model_id}")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
+        self.model = AutoModelForMaskedLM.from_pretrained(self.config.model_id)
+        self.model.to(self.device)
+        self.model.eval()
+
+    def _encode_splade(self, texts: List[str]) -> List[Dict[int, float]]:
+        """Encode texts to SPLADE sparse vectors."""
+        import torch
+
+        sparse_vecs = []
+        batch_size = self.config.batch_size
+
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            inputs = self.tokenizer(
+                batch,
+                padding=True,
+                truncation=True,
+                max_length=self.config.max_length,
+                return_tensors="pt",
+            ).to(self.device)
+
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                # SPLADE: log(1 + ReLU(logits)) * attention_mask, then max over sequence
+                logits = outputs.logits
+                # Apply SPLADE transformation
+                splade_vecs = torch.log1p(torch.relu(logits))
+                # Max pooling over sequence dimension, masked
+                attention_mask = inputs["attention_mask"].unsqueeze(-1)
+                splade_vecs = splade_vecs * attention_mask
+                splade_vecs = splade_vecs.max(dim=1).values  # [batch, vocab_size]
+
+            # Convert to sparse dicts
+            for vec in splade_vecs.cpu().numpy():
+                nonzero = np.nonzero(vec)[0]
+                sparse_dict = {int(idx): float(vec[idx]) for idx in nonzero if vec[idx] > 0}
+                sparse_vecs.append(sparse_dict)
+
+        return sparse_vecs
+
+    def encode_corpus(self, rebuild: bool = False) -> None:
+        """Encode and cache corpus sparse embeddings."""
+        cache_path = self.cache_dir / "splade_sparse.pkl"
+        fingerprint_path = self.cache_dir / "fingerprint.json"
+
+        if not rebuild and cache_path.exists() and fingerprint_path.exists():
+            with open(fingerprint_path) as f:
+                meta = json.load(f)
+            if (meta.get("corpus") == self._corpus_fingerprint() and
+                meta.get("config") == self._config_fingerprint()):
+                logger.info(f"Loading cached SPLADE embeddings from {cache_path}")
+                with open(cache_path, "rb") as f:
+                    self.doc_embeddings = pickle.load(f)
+                return
+
+        self._load_model()
+        texts = [sent.text for sent in self.sentences]
+
+        logger.info(f"Encoding {len(texts)} documents with SPLADE")
+        self.doc_embeddings = self._encode_splade(texts)
+
+        with open(cache_path, "wb") as f:
+            pickle.dump(self.doc_embeddings, f)
+        with open(fingerprint_path, "w") as f:
+            json.dump({
+                "corpus": self._corpus_fingerprint(),
+                "config": self._config_fingerprint(),
+                "model_id": self.config.model_id,
+                "num_sentences": len(self.sentences),
+            }, f, indent=2)
+
+    def retrieve_within_post(
+        self,
+        query: str,
+        post_id: str,
+        top_k: int = 100,
+    ) -> List[RetrievalResult]:
+        """Retrieve using SPLADE sparse dot product."""
+        if self.doc_embeddings is None:
+            self.encode_corpus()
+
+        indices = self.post_to_indices.get(post_id, [])
+        if not indices:
+            return []
+
+        self._load_model()
+
+        # Encode query
+        query_sparse = self._encode_splade([query])[0]
+
+        # Compute sparse dot product scores
+        scores = []
+        for idx in indices:
+            doc_sparse = self.doc_embeddings[idx]
+            # Sparse dot product
+            score = sum(query_sparse.get(k, 0) * v for k, v in doc_sparse.items())
+            scores.append(score)
+
+        # Rank and return
+        ranked = sorted(zip(indices, scores), key=lambda x: -x[1])[:top_k]
+        results = []
+        for idx, score in ranked:
+            sent = self.sentences[idx]
+            results.append(RetrievalResult(
+                sent_uid=sent.sent_uid,
+                text=sent.text,
+                score=float(score),
+                component_scores={"splade": float(score)},
+            ))
+        return results
+
+
 class RetrieverZoo:
     """Factory and manager for multiple retrievers."""
 
@@ -409,11 +760,152 @@ class RetrieverZoo:
             retriever_type="dense",
             max_length=8192,
             batch_size=32,
+            trust_remote_code=True,
         ),
         RetrieverConfig(
             name="bm25",
             model_id="bm25",
             retriever_type="lexical",
+        ),
+        # SPLADE sparse neural retriever (Tier-0)
+        RetrieverConfig(
+            name="splade-cocondenser",
+            model_id="naver/splade-cocondenser-ensembledistil",
+            retriever_type="sparse",
+            max_length=256,
+            batch_size=32,
+        ),
+        # ColBERTv2 late interaction (Tier-2)
+        RetrieverConfig(
+            name="colbertv2",
+            model_id="colbert-ir/colbertv2.0",
+            retriever_type="late_interaction",
+            max_length=256,
+            batch_size=32,
+        ),
+        # E5-Mistral instruction-tuned (Tier-1) - BF16
+        RetrieverConfig(
+            name="e5-mistral-7b",
+            model_id="intfloat/e5-mistral-7b-instruct",
+            retriever_type="dense",
+            max_length=4096,
+            batch_size=2,
+            query_prefix="Instruct: Retrieve evidence sentences supporting the criterion.\nQuery: ",
+        ),
+        # GTE-Qwen2 instruction-tuned (Tier-1) - BF16
+        RetrieverConfig(
+            name="gte-qwen2-7b",
+            model_id="Alibaba-NLP/gte-Qwen2-7B-instruct",
+            retriever_type="dense",
+            max_length=8192,
+            batch_size=2,
+            trust_remote_code=True,
+        ),
+        # === Models from retriever_lists.md ===
+        # Qwen3-Embedding family (instruction-aware, MRL support)
+        RetrieverConfig(
+            name="qwen3-embed-0.6b",
+            model_id="Qwen/Qwen3-Embedding-0.6B",
+            retriever_type="dense",
+            max_length=8192,
+            batch_size=32,
+            query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
+            trust_remote_code=True,
+        ),
+        RetrieverConfig(
+            name="qwen3-embed-4b",
+            model_id="Qwen/Qwen3-Embedding-4B",
+            retriever_type="dense",
+            max_length=8192,
+            batch_size=8,
+            query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
+            trust_remote_code=True,
+        ),
+        RetrieverConfig(
+            name="qwen3-embed-8b",
+            model_id="Qwen/Qwen3-Embedding-8B",
+            retriever_type="dense",
+            max_length=8192,
+            batch_size=4,
+            query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
+            trust_remote_code=True,
+        ),
+        # Stella (English-focused mid-size)
+        RetrieverConfig(
+            name="stella-1.5b",
+            model_id="NovaSearch/stella_en_1.5B_v5",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=16,
+            query_prefix="Instruct: Retrieve evidence sentences.\nQuery: ",
+        ),
+        # Mixedbread (strong permissive baseline)
+        RetrieverConfig(
+            name="mxbai-embed-large",
+            model_id="mixedbread-ai/mxbai-embed-large-v1",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=32,
+        ),
+        # UAE-Large (MIT, universal embedder)
+        RetrieverConfig(
+            name="uae-large",
+            model_id="WhereIsAI/UAE-Large-V1",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=32,
+        ),
+        # Snowflake Arctic (open, lightweight)
+        RetrieverConfig(
+            name="arctic-embed-l",
+            model_id="Snowflake/snowflake-arctic-embed-l",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=32,
+            query_prefix="Represent this sentence for searching relevant passages: ",
+        ),
+        # NVIDIA Llama-Embed (research only, SOTA)
+        RetrieverConfig(
+            name="llama-embed-8b",
+            model_id="nvidia/llama-embed-nemotron-8b",
+            retriever_type="dense",
+            max_length=512,  # Reduced from 32768 for memory
+            batch_size=2,
+            query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
+            trust_remote_code=True,
+            use_4bit=True,  # Enable 4-bit quantization for 8B model
+        ),
+        # NVIDIA NV-Embed-v2 (Mistral-7B based, research only)
+        RetrieverConfig(
+            name="nv-embed-v2",
+            model_id="nvidia/NV-Embed-v2",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=2,
+            query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
+            trust_remote_code=True,
+            use_4bit=True,  # Enable 4-bit quantization for 7B model
+        ),
+        # Salesforce SFR-Embedding-Mistral (research only)
+        RetrieverConfig(
+            name="sfr-embedding-mistral",
+            model_id="Salesforce/SFR-Embedding-Mistral",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=2,
+            query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
+            use_4bit=True,  # Enable 4-bit quantization for 7B model
+        ),
+        # Qwen3-8B with 4-bit quantization (retry OOM)
+        RetrieverConfig(
+            name="qwen3-embed-8b-4bit",
+            model_id="Qwen/Qwen3-Embedding-8B",
+            retriever_type="dense",
+            max_length=512,  # Reduced for memory
+            batch_size=2,
+            query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
+            trust_remote_code=True,
+            use_4bit=True,  # Enable 4-bit quantization
         ),
     ]
 
@@ -470,6 +962,20 @@ class RetrieverZoo:
                 config=config,
                 sentences=self.sentences,
                 cache_dir=self.cache_dir,
+            )
+        elif config.retriever_type == "sparse":
+            return SPLADERetriever(
+                config=config,
+                sentences=self.sentences,
+                cache_dir=self.cache_dir,
+                device=self.device,
+            )
+        elif config.retriever_type == "late_interaction":
+            return ColBERTv2Retriever(
+                config=config,
+                sentences=self.sentences,
+                cache_dir=self.cache_dir,
+                device=self.device,
             )
         else:
             raise ValueError(f"Unknown retriever type: {config.retriever_type}")

@@ -5,5 +5,5 @@
   "query_max_length": 128,
   "passage_max_length": 256,
   "use_fp16": true,
-  "batch_size": 256
+  "batch_size": 64
 }
