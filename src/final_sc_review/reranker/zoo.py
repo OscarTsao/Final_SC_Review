@@ -133,6 +133,28 @@ class BaseReranker(ABC):
         score_map = {r.sent_uid: r.score for r in results}
         return [score_map.get(f"doc_{i}", 0.0) for i in range(len(documents))]
 
+    def rerank_batch(
+        self,
+        queries_and_candidates: List[Tuple[str, List[Tuple[str, str]]]],
+        top_k: Optional[int] = None,
+    ) -> List[List[RerankerResult]]:
+        """Batch rerank multiple queries efficiently.
+
+        Args:
+            queries_and_candidates: List of (query, candidates) pairs
+                where candidates is List[(sent_uid, text)]
+            top_k: Return top-k results per query (None = all)
+
+        Returns:
+            List of result lists, one per query
+        """
+        # Default implementation: process sequentially
+        # Subclasses can override for batched processing
+        return [
+            self.rerank(query, candidates, top_k)
+            for query, candidates in queries_and_candidates
+        ]
+
 
 class CrossEncoderReranker(BaseReranker):
     """Cross-encoder reranker using sentence-transformers."""
@@ -226,6 +248,75 @@ class CrossEncoderReranker(BaseReranker):
             results = results[:top_k]
 
         return results
+
+    def rerank_batch(
+        self,
+        queries_and_candidates: List[Tuple[str, List[Tuple[str, str]]]],
+        top_k: Optional[int] = None,
+    ) -> List[List[RerankerResult]]:
+        """Batch rerank multiple queries efficiently.
+
+        Combines all pairs across queries into one batch for GPU efficiency.
+        """
+        if self.model is None:
+            self.load_model()
+
+        if not queries_and_candidates:
+            return []
+
+        # Build all pairs and track query boundaries
+        all_pairs = []
+        query_boundaries = []  # (start_idx, end_idx, query_idx)
+        current_idx = 0
+        candidate_info = []  # Store (sent_uid, text) for rebuilding results
+
+        for query_idx, (query, candidates) in enumerate(queries_and_candidates):
+            if not candidates:
+                query_boundaries.append((current_idx, current_idx, query_idx))
+                continue
+
+            # Apply instruction if configured
+            q = self.config.query_instruction + query if self.config.query_instruction else query
+
+            start_idx = current_idx
+            for sent_uid, text in candidates:
+                doc = self.config.doc_instruction + text if self.config.doc_instruction else text
+                all_pairs.append((q, doc))
+                candidate_info.append((sent_uid, text, query_idx))
+                current_idx += 1
+
+            query_boundaries.append((start_idx, current_idx, query_idx))
+
+        if not all_pairs:
+            return [[] for _ in queries_and_candidates]
+
+        # Score all pairs in one batch
+        all_scores = self.model.predict(
+            all_pairs,
+            batch_size=self.config.batch_size,
+            show_progress_bar=False,
+        )
+
+        # Rebuild results per query
+        all_results = [[] for _ in queries_and_candidates]
+
+        for i, (sent_uid, text, query_idx) in enumerate(candidate_info):
+            all_results[query_idx].append(RerankerResult(
+                sent_uid=sent_uid,
+                text=text,
+                score=float(all_scores[i]),
+                rank=0,
+            ))
+
+        # Sort and rank each query's results
+        for results in all_results:
+            results.sort(key=lambda x: -x.score)
+            for i, r in enumerate(results):
+                r.rank = i + 1
+            if top_k:
+                results[:] = results[:top_k]
+
+        return all_results
 
 
 class ListwiseReranker(BaseReranker):
@@ -345,6 +436,93 @@ class ListwiseReranker(BaseReranker):
 
         return results
 
+    def rerank_batch(
+        self,
+        queries_and_candidates: List[Tuple[str, List[Tuple[str, str]]]],
+        top_k: Optional[int] = None,
+    ) -> List[List[RerankerResult]]:
+        """Batch rerank multiple queries efficiently.
+
+        Combines pairs across queries for better GPU utilization.
+        """
+        if self.model is None:
+            self.load_model()
+
+        if not queries_and_candidates:
+            return []
+
+        # Build all pairs
+        all_queries = []
+        all_texts = []
+        candidate_info = []  # (sent_uid, text, query_idx)
+
+        for query_idx, (query, candidates) in enumerate(queries_and_candidates):
+            if not candidates:
+                continue
+
+            q = self.config.query_instruction + query if self.config.query_instruction else query
+
+            for sent_uid, text in candidates:
+                all_queries.append(q)
+                all_texts.append(text)
+                candidate_info.append((sent_uid, text, query_idx))
+
+        if not all_queries:
+            return [[] for _ in queries_and_candidates]
+
+        # Score all pairs in batches
+        all_scores = []
+        batch_size = self.config.batch_size
+
+        for i in range(0, len(all_queries), batch_size):
+            batch_queries = all_queries[i:i + batch_size]
+            batch_texts = all_texts[i:i + batch_size]
+
+            inputs = self.tokenizer(
+                batch_queries,
+                batch_texts,
+                padding=True,
+                truncation=True,
+                max_length=self.config.max_length,
+                return_tensors="pt",
+            ).to(self.device)
+
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                logits = outputs.logits.float().cpu().numpy()
+                if logits.ndim == 1:
+                    scores = logits.tolist()
+                elif logits.ndim == 2 and logits.shape[1] == 1:
+                    scores = logits.squeeze(-1).tolist()
+                else:
+                    scores = logits[:, 0].tolist()
+
+                if not isinstance(scores, list):
+                    scores = [float(scores)]
+
+                all_scores.extend(scores)
+
+        # Rebuild results per query
+        all_results = [[] for _ in queries_and_candidates]
+
+        for i, (sent_uid, text, query_idx) in enumerate(candidate_info):
+            all_results[query_idx].append(RerankerResult(
+                sent_uid=sent_uid,
+                text=text,
+                score=float(all_scores[i]),
+                rank=0,
+            ))
+
+        # Sort and rank each query's results
+        for results in all_results:
+            results.sort(key=lambda x: -x.score)
+            for i, r in enumerate(results):
+                r.rank = i + 1
+            if top_k:
+                results[:] = results[:top_k]
+
+        return all_results
+
 
 class BGELightweightReranker(BaseReranker):
     """BGE lightweight reranker with layer cutoff and token compression."""
@@ -447,7 +625,7 @@ class RerankerZoo:
             model_id="jinaai/jina-reranker-v3",
             reranker_type="listwise",  # Uses custom tokenizer handling
             max_length=1024,
-            batch_size=32,
+            batch_size=128,  # 4x for RTX 5090 32GB
             listwise_max_docs=32,
             trust_remote_code=True,
         ),
@@ -457,7 +635,7 @@ class RerankerZoo:
             model_id="jinaai/jina-reranker-v2-base-multilingual",
             reranker_type="cross-encoder",
             max_length=1024,
-            batch_size=48,  # Increased for better GPU utilization
+            batch_size=192,  # 4x for RTX 5090 32GB
             trust_remote_code=True,
         ),
         # mxbai-rerank-base-v2 (fast strong open baseline)
@@ -466,7 +644,7 @@ class RerankerZoo:
             model_id="mixedbread-ai/mxbai-rerank-base-v2",
             reranker_type="cross-encoder",
             max_length=512,
-            batch_size=64,
+            batch_size=256,  # 4x for RTX 5090 32GB
         ),
         # mxbai-rerank-large-v2 (quality push)
         RerankerConfig(
@@ -474,7 +652,7 @@ class RerankerZoo:
             model_id="mixedbread-ai/mxbai-rerank-large-v2",
             reranker_type="cross-encoder",
             max_length=512,
-            batch_size=32,
+            batch_size=128,  # 4x for RTX 5090 32GB
         ),
         # mxbai-rerank-base-v1 (legacy)
         RerankerConfig(
@@ -482,7 +660,7 @@ class RerankerZoo:
             model_id="mixedbread-ai/mxbai-rerank-base-v1",
             reranker_type="cross-encoder",
             max_length=512,
-            batch_size=64,  # Increased for better GPU utilization
+            batch_size=256,  # 4x for RTX 5090 32GB
         ),
         # mxbai-rerank-large-v1 (legacy)
         RerankerConfig(
@@ -490,7 +668,7 @@ class RerankerZoo:
             model_id="mixedbread-ai/mxbai-rerank-large-v1",
             reranker_type="cross-encoder",
             max_length=512,
-            batch_size=32,  # Increased for better GPU utilization
+            batch_size=128,  # 4x for RTX 5090 32GB
         ),
         # Qwen3-Reranker-0.6B (instruction-aware, Qwen3-based)
         RerankerConfig(
@@ -498,7 +676,7 @@ class RerankerZoo:
             model_id="Qwen/Qwen3-Reranker-0.6B",
             reranker_type="listwise",  # Uses custom tokenizer handling
             max_length=1024,
-            batch_size=16,
+            batch_size=64,  # 4x for RTX 5090 32GB
             listwise_max_docs=32,
             trust_remote_code=True,
             query_instruction="Instruct: Given a criterion, determine if the passage provides supporting evidence.\nQuery: ",
@@ -509,7 +687,7 @@ class RerankerZoo:
             model_id="Qwen/Qwen3-Reranker-4B",
             reranker_type="listwise",  # Uses custom tokenizer handling
             max_length=1024,
-            batch_size=8,
+            batch_size=32,  # 4x for RTX 5090 32GB
             listwise_max_docs=16,
             trust_remote_code=True,
             query_instruction="Instruct: Given a criterion, determine if the passage provides supporting evidence.\nQuery: ",
@@ -521,7 +699,7 @@ class RerankerZoo:
             model_id="BAAI/bge-reranker-v2-m3",
             reranker_type="cross-encoder",
             max_length=512,
-            batch_size=64,  # Increased for better GPU utilization
+            batch_size=256,  # 4x for RTX 5090 32GB
         ),
         # BGE-reranker-v2.5-gemma2-lightweight
         RerankerConfig(
@@ -529,7 +707,7 @@ class RerankerZoo:
             model_id="BAAI/bge-reranker-v2.5-gemma2-lightweight",
             reranker_type="lightweight",
             max_length=512,
-            batch_size=16,
+            batch_size=64,  # 4x for RTX 5090 32GB
             cutoff_layers=28,  # Use layer 28 for speed/quality tradeoff
         ),
         # MS MARCO MiniLM (fast baseline)
@@ -538,7 +716,73 @@ class RerankerZoo:
             model_id="cross-encoder/ms-marco-MiniLM-L-12-v2",
             reranker_type="cross-encoder",
             max_length=512,
-            batch_size=128,  # Increased for better GPU utilization (small model)
+            batch_size=512,  # 4x for RTX 5090 32GB (small model)
+        ),
+        # === Additional rerankers from comprehensive list ===
+        # BGE Reranker Large (original)
+        RerankerConfig(
+            name="bge-reranker-large",
+            model_id="BAAI/bge-reranker-large",
+            reranker_type="cross-encoder",
+            max_length=512,
+            batch_size=128,
+        ),
+        # BGE Reranker v2 Gemma
+        RerankerConfig(
+            name="bge-reranker-v2-gemma",
+            model_id="BAAI/bge-reranker-v2-gemma",
+            reranker_type="cross-encoder",
+            max_length=512,
+            batch_size=32,
+            trust_remote_code=True,
+        ),
+        # BGE Reranker v2 MiniCPM Layerwise
+        RerankerConfig(
+            name="bge-reranker-v2-minicpm",
+            model_id="BAAI/bge-reranker-v2-minicpm-layerwise",
+            reranker_type="lightweight",
+            max_length=512,
+            batch_size=32,
+            cutoff_layers=28,
+            trust_remote_code=True,
+        ),
+        # Jina Reranker m0 (smaller/faster)
+        RerankerConfig(
+            name="jina-reranker-m0",
+            model_id="jinaai/jina-reranker-m0",
+            reranker_type="cross-encoder",
+            max_length=512,
+            batch_size=128,
+            trust_remote_code=True,
+        ),
+        # GTE Multilingual Reranker Base
+        RerankerConfig(
+            name="gte-reranker-base",
+            model_id="Alibaba-NLP/gte-multilingual-reranker-base",
+            reranker_type="cross-encoder",
+            max_length=512,
+            batch_size=128,
+            trust_remote_code=True,
+        ),
+        # RankZephyr 7B (LLM listwise reranker)
+        RerankerConfig(
+            name="rank-zephyr-7b",
+            model_id="castorini/rank_zephyr_7b_v1_full",
+            reranker_type="listwise",
+            max_length=4096,
+            batch_size=1,  # LLM-based, memory intensive
+            listwise_max_docs=20,
+            trust_remote_code=True,
+        ),
+        # Qwen3 Reranker 8B
+        RerankerConfig(
+            name="qwen3-reranker-8b",
+            model_id="Qwen/Qwen3-Reranker-8B",
+            reranker_type="listwise",
+            max_length=8192,
+            batch_size=8,
+            listwise_max_docs=32,
+            trust_remote_code=True,
         ),
     ]
 

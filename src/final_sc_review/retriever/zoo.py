@@ -725,24 +725,183 @@ class SPLADERetriever(BaseRetriever):
         return results
 
 
+class NVEmbedRetriever(BaseRetriever):
+    """NV-Embed-v2 retriever using custom encoding methods.
+
+    NV-Embed-v2 is a Mistral-7B based model that requires special handling:
+    - Uses `model._do_encode()` for corpus encoding (no instruction)
+    - Uses `model.encode()` for query encoding (with instruction)
+    """
+
+    def __init__(
+        self,
+        config: RetrieverConfig,
+        sentences: List[Sentence],
+        cache_dir: Path,
+        device: Optional[str] = None,
+    ):
+        super().__init__(config, sentences, cache_dir)
+        self.device = device or "cuda"
+        self.embeddings: Optional[np.ndarray] = None
+        self.model = None
+
+    def _load_model(self):
+        """Lazy load the NV-Embed-v2 model."""
+        if self.model is not None:
+            return
+
+        # Apply DynamicCache compatibility patch
+        _patch_dynamic_cache_compat()
+
+        import torch
+        from transformers import AutoModel
+
+        logger.info(f"Loading NV-Embed-v2 model: {self.config.model_id}")
+
+        model_kwargs = {
+            "trust_remote_code": True,
+        }
+
+        # Determine dtype and quantization
+        if self.config.use_4bit:
+            try:
+                from transformers import BitsAndBytesConfig
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4",
+                )
+                logger.info("  Using 4-bit quantization")
+            except ImportError:
+                logger.warning("bitsandbytes not available, using BF16")
+                model_kwargs["torch_dtype"] = torch.bfloat16
+        else:
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                model_kwargs["torch_dtype"] = torch.bfloat16
+                logger.info("  Using BF16 precision")
+            else:
+                model_kwargs["torch_dtype"] = torch.float16
+                logger.info("  Using FP16 precision")
+
+        self.model = AutoModel.from_pretrained(self.config.model_id, **model_kwargs)
+
+        # Only move to device if not quantized (quantized models handle this)
+        if not self.config.use_4bit:
+            self.model = self.model.to(self.device)
+
+        self.model.eval()
+        logger.info("  NV-Embed-v2 loaded successfully!")
+
+    def encode_corpus(self, rebuild: bool = False) -> None:
+        """Encode and cache corpus embeddings using _do_encode()."""
+        cache_path = self.cache_dir / "embeddings.npy"
+        fingerprint_path = self.cache_dir / "fingerprint.json"
+
+        if not rebuild and cache_path.exists() and fingerprint_path.exists():
+            with open(fingerprint_path) as f:
+                meta = json.load(f)
+            if (meta.get("corpus") == self._corpus_fingerprint() and
+                meta.get("config") == self._config_fingerprint()):
+                logger.info(f"Loading cached NV-Embed-v2 embeddings from {cache_path}")
+                self.embeddings = np.load(cache_path)
+                return
+
+        self._load_model()
+        texts = [sent.text for sent in self.sentences]
+
+        logger.info(f"Encoding {len(texts)} sentences with NV-Embed-v2")
+
+        # NV-Embed-v2 uses _do_encode for batch encoding
+        # For passages, no instruction prefix is needed
+        corpus_embeddings = self.model._do_encode(
+            texts,
+            batch_size=self.config.batch_size,
+            instruction="",  # No instruction for passages
+            max_length=self.config.max_length,
+            num_workers=0,
+        )
+
+        # Convert to numpy and normalize
+        corpus_embeddings = corpus_embeddings.cpu().numpy()
+        norms = np.linalg.norm(corpus_embeddings, axis=1, keepdims=True)
+        self.embeddings = corpus_embeddings / (norms + 1e-8)
+
+        np.save(cache_path, self.embeddings)
+        with open(fingerprint_path, "w") as f:
+            json.dump({
+                "corpus": self._corpus_fingerprint(),
+                "config": self._config_fingerprint(),
+                "model_id": self.config.model_id,
+                "num_sentences": len(self.sentences),
+            }, f, indent=2)
+
+        logger.info(f"Saved NV-Embed-v2 embeddings to {cache_path}")
+
+    def retrieve_within_post(
+        self,
+        query: str,
+        post_id: str,
+        top_k: int = 100,
+    ) -> List[RetrievalResult]:
+        """Retrieve candidates from within a specific post."""
+        if self.embeddings is None:
+            self.encode_corpus()
+
+        indices = self.post_to_indices.get(post_id, [])
+        if not indices:
+            return []
+
+        self._load_model()
+
+        # Encode query with instruction
+        query_instruction = self.config.query_prefix or "Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: "
+
+        query_emb = self.model.encode(
+            [query],
+            instruction=query_instruction,
+            max_length=self.config.max_length,
+        )
+        query_emb = query_emb.cpu().numpy()[0]
+        # Normalize
+        query_emb = query_emb / (np.linalg.norm(query_emb) + 1e-8)
+
+        # Get within-post candidates
+        candidate_embs = self.embeddings[indices]
+        scores = candidate_embs @ query_emb
+
+        ranked_indices = np.argsort(-scores)[:top_k]
+        results = []
+        for rank_idx in ranked_indices:
+            idx = indices[rank_idx]
+            sent = self.sentences[idx]
+            results.append(RetrievalResult(
+                sent_uid=sent.sent_uid,
+                text=sent.text,
+                score=float(scores[rank_idx]),
+                component_scores={"dense": float(scores[rank_idx])},
+            ))
+        return results
+
+
 class RetrieverZoo:
     """Factory and manager for multiple retrievers."""
 
-    # Default retriever configurations
+    # Default retriever configurations - optimized for RTX 5090 32GB
     DEFAULT_RETRIEVERS = [
         RetrieverConfig(
             name="bge-m3",
             model_id="BAAI/bge-m3",
             retriever_type="hybrid",
             max_length=256,
-            batch_size=64,
+            batch_size=256,  # 4x for RTX 5090 32GB
         ),
         RetrieverConfig(
             name="bge-large-en-v1.5",
             model_id="BAAI/bge-large-en-v1.5",
             retriever_type="dense",
             max_length=512,
-            batch_size=64,
+            batch_size=256,  # 4x for RTX 5090 32GB
             query_prefix="Represent this sentence for searching relevant passages: ",
         ),
         RetrieverConfig(
@@ -750,7 +909,7 @@ class RetrieverZoo:
             model_id="intfloat/e5-large-v2",
             retriever_type="dense",
             max_length=512,
-            batch_size=64,
+            batch_size=256,  # 4x for RTX 5090 32GB
             query_prefix="query: ",
             passage_prefix="passage: ",
         ),
@@ -759,7 +918,7 @@ class RetrieverZoo:
             model_id="Alibaba-NLP/gte-large-en-v1.5",
             retriever_type="dense",
             max_length=8192,
-            batch_size=32,
+            batch_size=128,  # 4x for RTX 5090 32GB
             trust_remote_code=True,
         ),
         RetrieverConfig(
@@ -773,7 +932,7 @@ class RetrieverZoo:
             model_id="naver/splade-cocondenser-ensembledistil",
             retriever_type="sparse",
             max_length=256,
-            batch_size=32,
+            batch_size=128,  # 4x for RTX 5090 32GB
         ),
         # ColBERTv2 late interaction (Tier-2)
         RetrieverConfig(
@@ -781,7 +940,7 @@ class RetrieverZoo:
             model_id="colbert-ir/colbertv2.0",
             retriever_type="late_interaction",
             max_length=256,
-            batch_size=32,
+            batch_size=128,  # 4x for RTX 5090 32GB
         ),
         # E5-Mistral instruction-tuned (Tier-1) - BF16
         RetrieverConfig(
@@ -789,7 +948,7 @@ class RetrieverZoo:
             model_id="intfloat/e5-mistral-7b-instruct",
             retriever_type="dense",
             max_length=4096,
-            batch_size=2,
+            batch_size=8,  # 4x for RTX 5090 32GB
             query_prefix="Instruct: Retrieve evidence sentences supporting the criterion.\nQuery: ",
         ),
         # GTE-Qwen2 instruction-tuned (Tier-1) - BF16
@@ -798,7 +957,7 @@ class RetrieverZoo:
             model_id="Alibaba-NLP/gte-Qwen2-7B-instruct",
             retriever_type="dense",
             max_length=8192,
-            batch_size=2,
+            batch_size=8,  # 4x for RTX 5090 32GB
             trust_remote_code=True,
         ),
         # === Models from retriever_lists.md ===
@@ -808,7 +967,7 @@ class RetrieverZoo:
             model_id="Qwen/Qwen3-Embedding-0.6B",
             retriever_type="dense",
             max_length=8192,
-            batch_size=32,
+            batch_size=128,  # 4x for RTX 5090 32GB
             query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
             trust_remote_code=True,
         ),
@@ -817,7 +976,7 @@ class RetrieverZoo:
             model_id="Qwen/Qwen3-Embedding-4B",
             retriever_type="dense",
             max_length=8192,
-            batch_size=8,
+            batch_size=32,  # 4x for RTX 5090 32GB
             query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
             trust_remote_code=True,
         ),
@@ -826,7 +985,7 @@ class RetrieverZoo:
             model_id="Qwen/Qwen3-Embedding-8B",
             retriever_type="dense",
             max_length=8192,
-            batch_size=4,
+            batch_size=16,  # 4x for RTX 5090 32GB
             query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
             trust_remote_code=True,
         ),
@@ -836,7 +995,7 @@ class RetrieverZoo:
             model_id="NovaSearch/stella_en_1.5B_v5",
             retriever_type="dense",
             max_length=512,
-            batch_size=16,
+            batch_size=64,  # 4x for RTX 5090 32GB
             query_prefix="Instruct: Retrieve evidence sentences.\nQuery: ",
         ),
         # Mixedbread (strong permissive baseline)
@@ -845,7 +1004,7 @@ class RetrieverZoo:
             model_id="mixedbread-ai/mxbai-embed-large-v1",
             retriever_type="dense",
             max_length=512,
-            batch_size=32,
+            batch_size=128,  # 4x for RTX 5090 32GB
         ),
         # UAE-Large (MIT, universal embedder)
         RetrieverConfig(
@@ -853,7 +1012,7 @@ class RetrieverZoo:
             model_id="WhereIsAI/UAE-Large-V1",
             retriever_type="dense",
             max_length=512,
-            batch_size=32,
+            batch_size=128,  # 4x for RTX 5090 32GB
         ),
         # Snowflake Arctic (open, lightweight)
         RetrieverConfig(
@@ -861,7 +1020,7 @@ class RetrieverZoo:
             model_id="Snowflake/snowflake-arctic-embed-l",
             retriever_type="dense",
             max_length=512,
-            batch_size=32,
+            batch_size=128,  # 4x for RTX 5090 32GB
             query_prefix="Represent this sentence for searching relevant passages: ",
         ),
         # NVIDIA Llama-Embed (research only, SOTA)
@@ -876,15 +1035,16 @@ class RetrieverZoo:
             use_4bit=True,  # Enable 4-bit quantization for 8B model
         ),
         # NVIDIA NV-Embed-v2 (Mistral-7B based, research only)
+        # Note: Must use BF16 (no 4-bit) - 4-bit causes position embeddings issue
         RetrieverConfig(
             name="nv-embed-v2",
             model_id="nvidia/NV-Embed-v2",
             retriever_type="dense",
             max_length=512,
-            batch_size=2,
+            batch_size=8,  # BF16 fits in 32GB with batch=8
             query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
             trust_remote_code=True,
-            use_4bit=True,  # Enable 4-bit quantization for 7B model
+            use_4bit=False,  # BF16 required - 4-bit causes position embeddings issue
         ),
         # Salesforce SFR-Embedding-Mistral (research only)
         RetrieverConfig(
@@ -906,6 +1066,97 @@ class RetrieverZoo:
             query_prefix="Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: ",
             trust_remote_code=True,
             use_4bit=True,  # Enable 4-bit quantization
+        ),
+        # === Additional models from comprehensive list ===
+        # BGE-en-ICL (in-context learning retriever)
+        RetrieverConfig(
+            name="bge-en-icl",
+            model_id="BAAI/bge-en-icl",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=64,
+            trust_remote_code=True,
+        ),
+        # GTE-Qwen2-1.5B (smaller instruction-tuned)
+        RetrieverConfig(
+            name="gte-qwen2-1.5b",
+            model_id="Alibaba-NLP/gte-Qwen2-1.5B-instruct",
+            retriever_type="dense",
+            max_length=8192,
+            batch_size=64,
+            trust_remote_code=True,
+        ),
+        # Stella 400M (smaller variant)
+        RetrieverConfig(
+            name="stella-400m",
+            model_id="NovaSearch/stella_en_400M_v5",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=128,
+            query_prefix="Instruct: Retrieve evidence sentences.\nQuery: ",
+        ),
+        # Snowflake Arctic Embed v1.5 medium
+        RetrieverConfig(
+            name="arctic-embed-m-v1.5",
+            model_id="Snowflake/snowflake-arctic-embed-m-v1.5",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=128,
+            query_prefix="Represent this sentence for searching relevant passages: ",
+        ),
+        # Snowflake Arctic Embed v2.0 medium
+        RetrieverConfig(
+            name="arctic-embed-m-v2",
+            model_id="Snowflake/snowflake-arctic-embed-m-v2.0",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=128,
+            trust_remote_code=True,
+        ),
+        # Snowflake Arctic Embed v2.0 large
+        RetrieverConfig(
+            name="arctic-embed-l-v2",
+            model_id="Snowflake/snowflake-arctic-embed-l-v2.0",
+            retriever_type="dense",
+            max_length=512,
+            batch_size=64,
+            trust_remote_code=True,
+        ),
+        # Jina Embeddings v3 (multilingual, MRL)
+        RetrieverConfig(
+            name="jina-embed-v3",
+            model_id="jinaai/jina-embeddings-v3",
+            retriever_type="dense",
+            max_length=8192,
+            batch_size=64,
+            trust_remote_code=True,
+        ),
+        # Nomic Embed Text v1.5 (open, dynamic context)
+        RetrieverConfig(
+            name="nomic-embed-v1.5",
+            model_id="nomic-ai/nomic-embed-text-v1.5",
+            retriever_type="dense",
+            max_length=8192,
+            batch_size=128,
+            trust_remote_code=True,
+            query_prefix="search_query: ",
+            passage_prefix="search_document: ",
+        ),
+        # SPLADE v2 distil (lighter sparse)
+        RetrieverConfig(
+            name="splade-v2-distil",
+            model_id="naver/splade_v2_distil",
+            retriever_type="sparse",
+            max_length=256,
+            batch_size=128,
+        ),
+        # mxbai ColBERT large (late interaction)
+        RetrieverConfig(
+            name="mxbai-colbert-large",
+            model_id="mixedbread-ai/mxbai-colbert-large-v1",
+            retriever_type="late_interaction",
+            max_length=512,
+            batch_size=64,
         ),
     ]
 
@@ -951,6 +1202,14 @@ class RetrieverZoo:
                 device=self.device,
             )
         elif config.retriever_type == "dense":
+            # Use NVEmbedRetriever for NV-Embed-v2 (requires special encoding methods)
+            if config.name == "nv-embed-v2" or "NV-Embed" in config.model_id:
+                return NVEmbedRetriever(
+                    config=config,
+                    sentences=self.sentences,
+                    cache_dir=self.cache_dir,
+                    device=self.device,
+                )
             return DenseRetriever(
                 config=config,
                 sentences=self.sentences,

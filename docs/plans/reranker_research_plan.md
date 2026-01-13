@@ -384,6 +384,7 @@ outputs/reranker_research/
 |-------|--------------|--------|-----------|-----------|-------------|
 | **jina-reranker-v2** | **0.6968** | 0.6346 | 0.8899 | 0.00 | K=10, len=1024, thresh=1.53 |
 | bge-reranker-v2-m3 | 0.6962 | 0.6331 | 0.8871 | 0.00 | K=20, len=384, thresh=4.7 |
+| ms-marco-minilm | 0.6609 | 0.5870 | 0.8899 | 0.00 | K=10, len=384, thresh=4.08 |
 
 **Key Finding (2026-01-10):** After HPO, **jina-reranker-v2 beats bge-reranker-v2-m3** by +0.06% nDCG@10!
 - Optimal K is smaller (10 vs 20) - focusing on top candidates improves precision
@@ -434,11 +435,46 @@ batch_reranker = BatchReranker(zoo, "jina-reranker-v2")
 results = batch_reranker.rerank_batch(queries, batch_size=96, use_bucketing=True)
 ```
 
-### 16.6 Next Steps
+### 16.6 Training GPU Optimization (Implemented 2026-01-10)
 
-1. **Train fine-tuned rerankers (R1-R4)** - Domain adaptation may push beyond 0.70
+**Maximum GPU utilization trainer:** `src/final_sc_review/reranker/maxout_trainer.py`
+
+Implements all GPU optimizations for fast training:
+1. **Mixed precision (AMP)** - BF16/FP16 for 2x memory efficiency
+2. **Gradient accumulation** - Larger effective batch sizes
+3. **Multi-worker DataLoader** - Prefetching with pin_memory
+4. **torch.compile** - Kernel fusion (PyTorch 2.0+)
+5. **Flash Attention 2** - Efficient attention (when supported)
+6. **Gradient checkpointing** - Memory vs compute tradeoff
+7. **Learning rate scheduling** - Warmup + linear decay
+8. **Parallel HPO with Optuna** - Multi-trial parallelism
+
+**Training benchmark results (BGE-reranker-v2-m3, batch_size=8):**
+
+| Config | Batches/sec | GPU Util | Memory |
+|--------|-------------|----------|--------|
+| AMP BF16 | 5.22 | **99%** | 17.7 GB |
+| AMP BF16 + 4 Workers | **5.59** | 97% | 28.6 GB |
+
+**Training script:**
+```bash
+# Single training run
+python scripts/reranker/train_maxout.py \
+    --model BAAI/bge-reranker-v2-m3 \
+    --batch_size 16 --gradient_accumulation 4 \
+    --epochs 5 --use_amp
+
+# HPO mode (parallel trials)
+python scripts/reranker/train_maxout.py \
+    --model BAAI/bge-reranker-v2-m3 \
+    --hpo --n_trials 50 --n_jobs 2
+```
+
+### 16.7 Next Steps
+
+1. **Run training HPO for all rerankers** - Fine-tune with domain data
 2. **Calibration experiments** - Add threshold tuning for high false-evidence models
 3. **Test bge-reranker-gemma2-lightweight** - Potential speed/quality tradeoff
-4. **Integrate optimized inference into HPO** - Use BatchReranker for faster HPO trials
+4. **Multi-GPU training** - Scale to larger batch sizes with DDP
 
 ---
