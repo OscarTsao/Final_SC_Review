@@ -263,7 +263,7 @@ def run_data_audit(data, output_dir):
     return result
 
 
-def run_retriever_ranking(data, k_values=[1, 5, 10, 20]):
+def run_retriever_ranking(data, k_values=[1, 3, 5, 10, 20]):
     result = StageResult(name="Retriever Ranking")
     for fold_name in sorted([k for k in data.keys() if k.startswith('fold_')]):
         fold_data = data[fold_name]
@@ -300,7 +300,7 @@ def run_retriever_ranking(data, k_values=[1, 5, 10, 20]):
     return result
 
 
-def run_reranker_ranking(data, scorer, k_values=[1, 5, 10, 20]):
+def run_reranker_ranking(data, scorer, k_values=[1, 3, 5, 10, 20]):
     result = StageResult(name="Reranker Ranking")
     for fold_name in sorted([k for k in data.keys() if k.startswith('fold_')]):
         fold_data = data[fold_name]
@@ -418,6 +418,169 @@ def run_ne_detection(data, scorer, output_dir, ne_score_type="score_gap"):
     return result
 
 
+# NO_EVIDENCE pseudo-candidate token (must match training)
+NO_EVIDENCE_TOKEN = "[NO_EVIDENCE]"
+
+
+def run_ne_ranking_check(data, scorer, output_dir):
+    """Check NO_EVIDENCE ranking: does NO_EVIDENCE rank appropriately?
+
+    For no-evidence queries: NO_EVIDENCE should rank #1
+    For has-evidence queries: Real evidence should rank above NO_EVIDENCE
+    """
+    result = StageResult(name="NO_EVIDENCE Ranking")
+
+    all_y_true = []
+    all_y_pred = []
+    all_ne_ranks = []
+    all_ne_scores = []
+    all_top1_scores = []
+
+    for fold_name in sorted([k for k in data.keys() if k.startswith('fold_')]):
+        fold_data = data[fold_name]
+        val_data = fold_data.get('val_data', [])
+        fold_id = int(fold_name.split('_')[1])
+        fm = FoldMetrics(fold_id=fold_id)
+
+        # Metrics for this fold
+        ne_top1_correct = 0  # NO_EVIDENCE ranked #1 for no-evidence queries
+        ne_top1_total = 0
+        evidence_above_ne = 0  # Real evidence ranked above NO_EVIDENCE
+        evidence_above_total = 0
+
+        y_true_fold = []
+        y_pred_fold = []
+        ne_ranks_fold = []
+        score_margins = []  # score(top_evidence) - score(NO_EVIDENCE)
+
+        print(f"  [Fold {fold_id}] Checking NO_EVIDENCE ranking...")
+        for query in tqdm(val_data, desc=f"Fold {fold_id}", leave=False):
+            is_no_evidence = query.get('is_no_evidence', True)
+            candidates = query.get('candidates', [])
+
+            if not candidates:
+                continue
+
+            query_text = query.get('query', '')
+            texts = [c.get('text', '') for c in candidates]
+            labels = [c.get('label', 0) for c in candidates]
+
+            # Add NO_EVIDENCE to candidate list
+            texts_with_ne = texts + [NO_EVIDENCE_TOKEN]
+            labels_with_ne = labels + [0]  # NO_EVIDENCE is always label=0
+
+            # Score all candidates including NO_EVIDENCE
+            scores = scorer.score(query_text, texts_with_ne)
+
+            # Find NO_EVIDENCE score and rank
+            ne_idx = len(texts)  # NO_EVIDENCE is at the end
+            ne_score = scores[ne_idx]
+
+            # Sort by score descending
+            sorted_indices = np.argsort(scores)[::-1]
+            ne_rank = np.where(sorted_indices == ne_idx)[0][0] + 1  # 1-indexed rank
+
+            ne_ranks_fold.append(ne_rank)
+            all_ne_ranks.append(ne_rank)
+            all_ne_scores.append(ne_score)
+            all_top1_scores.append(scores[sorted_indices[0]])
+
+            # Classification: predict "no evidence" if NO_EVIDENCE is ranked #1
+            pred_no_evidence = (ne_rank == 1)
+            pred_has_evidence = not pred_no_evidence
+
+            # Ground truth: 1 = has evidence, 0 = no evidence
+            y_true = 0 if is_no_evidence else 1
+            y_pred = 1 if pred_has_evidence else 0
+
+            y_true_fold.append(y_true)
+            y_pred_fold.append(y_pred)
+            all_y_true.append(y_true)
+            all_y_pred.append(y_pred)
+
+            if is_no_evidence:
+                # For no-evidence queries: check if NO_EVIDENCE is #1
+                ne_top1_total += 1
+                if ne_rank == 1:
+                    ne_top1_correct += 1
+            else:
+                # For has-evidence queries: check if any positive ranks above NO_EVIDENCE
+                evidence_above_total += 1
+                # Find best positive candidate rank
+                positive_indices = [i for i, l in enumerate(labels_with_ne) if l == 1]
+                if positive_indices:
+                    positive_ranks = [np.where(sorted_indices == i)[0][0] + 1 for i in positive_indices]
+                    best_positive_rank = min(positive_ranks)
+                    if best_positive_rank < ne_rank:
+                        evidence_above_ne += 1
+                    # Score margin: best positive score - NO_EVIDENCE score
+                    best_positive_score = max(scores[i] for i in positive_indices)
+                    score_margins.append(best_positive_score - ne_score)
+
+        # Compute fold metrics
+        fm.metrics['ne_top1_accuracy'] = ne_top1_correct / ne_top1_total if ne_top1_total > 0 else 0
+        fm.metrics['evidence_above_ne'] = evidence_above_ne / evidence_above_total if evidence_above_total > 0 else 0
+        fm.metrics['ne_top1_total'] = ne_top1_total
+        fm.metrics['evidence_above_total'] = evidence_above_total
+        fm.metrics['avg_ne_rank'] = np.mean(ne_ranks_fold) if ne_ranks_fold else 0
+        fm.metrics['median_ne_rank'] = np.median(ne_ranks_fold) if ne_ranks_fold else 0
+
+        if score_margins:
+            fm.metrics['avg_score_margin'] = np.mean(score_margins)
+            fm.metrics['positive_margin_rate'] = sum(1 for m in score_margins if m > 0) / len(score_margins)
+
+        # Unified classification metrics (using NE rank as decision)
+        y_true_arr = np.array(y_true_fold)
+        y_pred_arr = np.array(y_pred_fold)
+
+        if len(np.unique(y_true_arr)) > 1:
+            binary_metrics = compute_binary_metrics(y_true_arr, y_pred_arr)
+            fm.metrics['unified_accuracy'] = binary_metrics['accuracy']
+            fm.metrics['unified_balanced_acc'] = binary_metrics['balanced_accuracy']
+            fm.metrics['unified_precision'] = binary_metrics['precision']
+            fm.metrics['unified_recall'] = binary_metrics['recall']
+            fm.metrics['unified_f1'] = binary_metrics['f1']
+            fm.metrics['unified_specificity'] = binary_metrics['specificity']
+            fm.metrics['unified_mcc'] = binary_metrics['mcc']
+
+        fm.metrics['n_queries'] = len(y_true_fold)
+        result.fold_metrics.append(fm)
+
+    result.aggregated = aggregate_fold_metrics(result.fold_metrics)
+
+    # Generate visualizations
+    curves_dir = output_dir / "curves"
+    curves_dir.mkdir(parents=True, exist_ok=True)
+
+    # NO_EVIDENCE rank distribution
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Split by query type
+    ne_ranks_no_ev = [r for r, y in zip(all_ne_ranks, all_y_true) if y == 0]
+    ne_ranks_has_ev = [r for r, y in zip(all_ne_ranks, all_y_true) if y == 1]
+
+    axes[0].hist(ne_ranks_no_ev, bins=20, alpha=0.7, label=f'No-Evidence (n={len(ne_ranks_no_ev)})', color='red')
+    axes[0].axvline(1, color='green', linestyle='--', linewidth=2, label='Ideal (rank=1)')
+    axes[0].set_xlabel('NO_EVIDENCE Rank')
+    axes[0].set_ylabel('Frequency')
+    axes[0].set_title('NO_EVIDENCE Rank for No-Evidence Queries\n(Should be rank 1)')
+    axes[0].legend()
+
+    axes[1].hist(ne_ranks_has_ev, bins=20, alpha=0.7, label=f'Has-Evidence (n={len(ne_ranks_has_ev)})', color='blue')
+    axes[1].axvline(np.mean(ne_ranks_has_ev), color='orange', linestyle='--', linewidth=2,
+                    label=f'Mean={np.mean(ne_ranks_has_ev):.1f}')
+    axes[1].set_xlabel('NO_EVIDENCE Rank')
+    axes[1].set_ylabel('Frequency')
+    axes[1].set_title('NO_EVIDENCE Rank for Has-Evidence Queries\n(Should be > 1)')
+    axes[1].legend()
+
+    plt.tight_layout()
+    plt.savefig(curves_dir / "ne_rank_distribution.png", dpi=150)
+    plt.close()
+
+    return result
+
+
 def run_dynamic_k_check(data, scorer, output_dir, fixed_k_values=[1, 3, 5, 10, 20]):
     result = StageResult(name="Dynamic-K")
     all_k_values = []
@@ -428,9 +591,11 @@ def run_dynamic_k_check(data, scorer, output_dir, fixed_k_values=[1, 3, 5, 10, 2
         fm = FoldMetrics(fold_id=fold_id)
         fixed_ndcg = {k: [] for k in fixed_k_values}
         fixed_recall = {k: [] for k in fixed_k_values}
+        fixed_precision = {k: [] for k in fixed_k_values}
         dynamic_k_list = []
         dynamic_ndcg = []
         dynamic_recall = []
+        dynamic_precision = []
         print(f"  [Fold {fold_id}] Computing Dynamic-K...")
         for query in tqdm(val_data, desc=f"Fold {fold_id}", leave=False):
             if query.get('is_no_evidence', True):
@@ -450,6 +615,9 @@ def run_dynamic_k_check(data, scorer, output_dir, fixed_k_values=[1, 3, 5, 10, 2
             for k in fixed_k_values:
                 fixed_ndcg[k].append(ndcg_at_k(relevances, k))
                 fixed_recall[k].append(recall_at_k(relevances, k))
+                # precision@K = (# relevant in top K) / K
+                top_k_rel = relevances[:min(k, len(relevances))]
+                fixed_precision[k].append(sum(top_k_rel) / k)
             if len(sorted_scores) > 1:
                 gaps = [sorted_scores[i] - sorted_scores[i+1] for i in range(len(sorted_scores)-1)]
                 if gaps:
@@ -463,13 +631,17 @@ def run_dynamic_k_check(data, scorer, output_dir, fixed_k_values=[1, 3, 5, 10, 2
             dynamic_k_list.append(dynamic_k)
             dynamic_ndcg.append(ndcg_at_k(relevances, dynamic_k))
             dynamic_recall.append(recall_at_k(relevances, dynamic_k))
+            # precision@dynamic_k = (# relevant in top dynamic_k) / dynamic_k
+            dynamic_precision.append(sum(relevances[:dynamic_k]) / dynamic_k)
         for k in fixed_k_values:
             fm.metrics[f'fixed_k{k}_ndcg'] = np.mean(fixed_ndcg[k]) if fixed_ndcg[k] else 0
             fm.metrics[f'fixed_k{k}_recall'] = np.mean(fixed_recall[k]) if fixed_recall[k] else 0
+            fm.metrics[f'fixed_k{k}_precision'] = np.mean(fixed_precision[k]) if fixed_precision[k] else 0
         fm.metrics['dynamic_k_mean'] = np.mean(dynamic_k_list) if dynamic_k_list else 0
         fm.metrics['dynamic_k_std'] = np.std(dynamic_k_list) if dynamic_k_list else 0
         fm.metrics['dynamic_ndcg'] = np.mean(dynamic_ndcg) if dynamic_ndcg else 0
         fm.metrics['dynamic_recall'] = np.mean(dynamic_recall) if dynamic_recall else 0
+        fm.metrics['dynamic_precision'] = np.mean(dynamic_precision) if dynamic_precision else 0
         fm.metrics['n_queries'] = len(dynamic_k_list)
         result.fold_metrics.append(fm)
         all_k_values.extend(dynamic_k_list)
@@ -722,9 +894,13 @@ def main():
         reranker_result = run_reranker_ranking(data, scorer)
         stages.append(reranker_result)
 
-        print("\n[Stage D] No-Evidence Detection...")
+        print("\n[Stage D] No-Evidence Detection (Threshold-based)...")
         ne_result = run_ne_detection(data, scorer, output_dir, args.ne_score_type)
         stages.append(ne_result)
+
+        print("\n[Stage D2] NO_EVIDENCE Ranking Check...")
+        ne_ranking_result = run_ne_ranking_check(data, scorer, output_dir)
+        stages.append(ne_ranking_result)
 
         print("\n[Stage E] Dynamic-K...")
         dynamic_k_result = run_dynamic_k_check(data, scorer, output_dir)
@@ -741,10 +917,49 @@ def main():
         per_post_df.to_csv(output_dir / "per_post.csv", index=False)
 
         ablations = {
-            'retriever_only': {'ndcg@20': retriever_result.aggregated.mean.get('ndcg@20', 0), 'recall@20': retriever_result.aggregated.mean.get('recall@20', 0)},
-            'reranker_only': {'ndcg@20': reranker_result.aggregated.mean.get('ndcg@20', 0), 'recall@20': reranker_result.aggregated.mean.get('recall@20', 0)},
-            'dynamic_k': {'dynamic_ndcg': dynamic_k_result.aggregated.mean.get('dynamic_ndcg', 0), 'dynamic_recall': dynamic_k_result.aggregated.mean.get('dynamic_recall', 0), 'avg_k': dynamic_k_result.aggregated.mean.get('dynamic_k_mean', 0)},
-            'full_pipeline': {'conditional_ndcg': e2e_result.aggregated.mean.get('conditional_ndcg', 0), 'conditional_recall': e2e_result.aggregated.mean.get('conditional_recall', 0), 'positive_coverage': e2e_result.aggregated.mean.get('positive_coverage', 0), 'negative_coverage': e2e_result.aggregated.mean.get('negative_coverage', 0)}
+            'retriever_only': {
+                'ndcg@1': retriever_result.aggregated.mean.get('ndcg@1', 0),
+                'ndcg@3': retriever_result.aggregated.mean.get('ndcg@3', 0),
+                'ndcg@5': retriever_result.aggregated.mean.get('ndcg@5', 0),
+                'ndcg@10': retriever_result.aggregated.mean.get('ndcg@10', 0),
+                'ndcg@20': retriever_result.aggregated.mean.get('ndcg@20', 0),
+                'recall@1': retriever_result.aggregated.mean.get('recall@1', 0),
+                'recall@3': retriever_result.aggregated.mean.get('recall@3', 0),
+                'recall@5': retriever_result.aggregated.mean.get('recall@5', 0),
+                'recall@10': retriever_result.aggregated.mean.get('recall@10', 0),
+                'recall@20': retriever_result.aggregated.mean.get('recall@20', 0),
+            },
+            'reranker_only': {
+                'ndcg@1': reranker_result.aggregated.mean.get('ndcg@1', 0),
+                'ndcg@3': reranker_result.aggregated.mean.get('ndcg@3', 0),
+                'ndcg@5': reranker_result.aggregated.mean.get('ndcg@5', 0),
+                'ndcg@10': reranker_result.aggregated.mean.get('ndcg@10', 0),
+                'ndcg@20': reranker_result.aggregated.mean.get('ndcg@20', 0),
+                'recall@1': reranker_result.aggregated.mean.get('recall@1', 0),
+                'recall@3': reranker_result.aggregated.mean.get('recall@3', 0),
+                'recall@5': reranker_result.aggregated.mean.get('recall@5', 0),
+                'recall@10': reranker_result.aggregated.mean.get('recall@10', 0),
+                'recall@20': reranker_result.aggregated.mean.get('recall@20', 0),
+            },
+            'dynamic_k': {
+                'dynamic_ndcg': dynamic_k_result.aggregated.mean.get('dynamic_ndcg', 0),
+                'dynamic_recall': dynamic_k_result.aggregated.mean.get('dynamic_recall', 0),
+                'avg_k': dynamic_k_result.aggregated.mean.get('dynamic_k_mean', 0),
+            },
+            'ne_ranking': {
+                'ne_top1_accuracy': ne_ranking_result.aggregated.mean.get('ne_top1_accuracy', 0),
+                'evidence_above_ne': ne_ranking_result.aggregated.mean.get('evidence_above_ne', 0),
+                'unified_balanced_acc': ne_ranking_result.aggregated.mean.get('unified_balanced_acc', 0),
+                'unified_f1': ne_ranking_result.aggregated.mean.get('unified_f1', 0),
+                'avg_ne_rank': ne_ranking_result.aggregated.mean.get('avg_ne_rank', 0),
+                'avg_score_margin': ne_ranking_result.aggregated.mean.get('avg_score_margin', 0),
+            },
+            'full_pipeline': {
+                'conditional_ndcg': e2e_result.aggregated.mean.get('conditional_ndcg', 0),
+                'conditional_recall': e2e_result.aggregated.mean.get('conditional_recall', 0),
+                'positive_coverage': e2e_result.aggregated.mean.get('positive_coverage', 0),
+                'negative_coverage': e2e_result.aggregated.mean.get('negative_coverage', 0),
+            }
         }
 
     print("\nGenerating outputs...")
