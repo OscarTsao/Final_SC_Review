@@ -60,8 +60,25 @@ from final_sc_review.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def load_datasets(config_path: str, max_candidates: int = 16):
-    """Load train and validation datasets."""
+def load_datasets(
+    config_path: str,
+    max_candidates: int = 16,
+    add_no_evidence: bool = False,
+    include_no_evidence_queries: bool = False,
+):
+    """Load train and validation datasets.
+
+    Args:
+        config_path: Path to config YAML file.
+        max_candidates: Maximum candidates per query.
+        add_no_evidence: If True, add NO_EVIDENCE pseudo-candidate to each query.
+            This enables unified no-evidence detection via ranking.
+        include_no_evidence_queries: If True, include queries with no positive
+            evidence in training (requires add_no_evidence=True).
+
+    Returns:
+        Tuple of (train_dataset, val_dataset, splits).
+    """
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
@@ -87,6 +104,8 @@ def load_datasets(config_path: str, max_candidates: int = 16):
         splits["train"],
         max_candidates=max_candidates,
         seed=cfg["split"]["seed"],
+        add_no_evidence=add_no_evidence,
+        include_no_evidence_queries=include_no_evidence_queries,
     )
     val_examples = build_grouped_examples(
         groundtruth,
@@ -94,18 +113,32 @@ def load_datasets(config_path: str, max_candidates: int = 16):
         splits["val"],
         max_candidates=max_candidates,
         seed=cfg["split"]["seed"],
+        add_no_evidence=add_no_evidence,
+        include_no_evidence_queries=include_no_evidence_queries,
     )
 
     train_dataset = GroupedRerankerDataset(train_examples)
     val_dataset = GroupedRerankerDataset(val_examples)
 
-    logger.info(f"Loaded {len(train_dataset)} train, {len(val_dataset)} val examples")
+    n_no_ev_train = sum(1 for ex in train_examples if ex.get("is_no_evidence", False))
+    n_no_ev_val = sum(1 for ex in val_examples if ex.get("is_no_evidence", False))
+    logger.info(
+        f"Loaded {len(train_dataset)} train ({n_no_ev_train} no-evidence), "
+        f"{len(val_dataset)} val ({n_no_ev_val} no-evidence) examples"
+    )
+    if add_no_evidence:
+        logger.info("NO_EVIDENCE pseudo-candidate enabled for unified evidence detection")
     return train_dataset, val_dataset, splits
 
 
 def run_training(args):
     """Run single training with maxout config."""
-    train_dataset, val_dataset, splits = load_datasets(args.config, args.max_candidates)
+    train_dataset, val_dataset, splits = load_datasets(
+        args.config,
+        args.max_candidates,
+        add_no_evidence=args.add_no_evidence,
+        include_no_evidence_queries=args.include_no_evidence_queries,
+    )
 
     config = MaxoutConfig(
         model_name=args.model,
@@ -186,7 +219,12 @@ def run_training(args):
 
 def run_hpo(args):
     """Run parallel HPO."""
-    train_dataset, val_dataset, _ = load_datasets(args.config, args.max_candidates)
+    train_dataset, val_dataset, _ = load_datasets(
+        args.config,
+        args.max_candidates,
+        add_no_evidence=args.add_no_evidence,
+        include_no_evidence_queries=args.include_no_evidence_queries,
+    )
 
     base_config = MaxoutConfig(
         model_name=args.model,
@@ -423,6 +461,15 @@ def main():
                         help="Config file for data paths")
     parser.add_argument("--max_candidates", type=int, default=50,
                         help="Max candidates per query")
+
+    # NO_EVIDENCE pseudo-candidate (unified evidence detection)
+    parser.add_argument("--add_no_evidence", action="store_true",
+                        help="Add NO_EVIDENCE pseudo-candidate to each query. "
+                             "Enables unified evidence detection via ranking.")
+    parser.add_argument("--include_no_evidence_queries", action="store_true",
+                        help="Include queries with no positive evidence in training. "
+                             "Requires --add_no_evidence. Model learns to rank "
+                             "NO_EVIDENCE first for these queries.")
 
     # Output
     parser.add_argument("--output_dir", type=str, default="outputs/training/maxout")

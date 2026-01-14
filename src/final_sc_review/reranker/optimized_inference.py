@@ -28,6 +28,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
 
+from final_sc_review.reranker.dataset import NO_EVIDENCE_TOKEN
 from final_sc_review.reranker.zoo import (
     BaseReranker,
     RerankerResult,
@@ -37,6 +38,78 @@ from final_sc_review.reranker.zoo import (
 from final_sc_review.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def is_no_evidence_top_ranked(results: List[RerankerResult]) -> bool:
+    """Check if NO_EVIDENCE pseudo-candidate is ranked first.
+
+    Args:
+        results: Sorted list of RerankerResult (highest score first).
+
+    Returns:
+        True if NO_EVIDENCE is the top-ranked result, False otherwise.
+    """
+    if not results:
+        return False
+    return results[0].text == NO_EVIDENCE_TOKEN
+
+
+def filter_no_evidence_from_results(
+    results: List[RerankerResult],
+) -> Tuple[List[RerankerResult], Optional[float]]:
+    """Remove NO_EVIDENCE from results and return its score.
+
+    Args:
+        results: Sorted list of RerankerResult.
+
+    Returns:
+        Tuple of (filtered_results, no_evidence_score).
+        no_evidence_score is None if NO_EVIDENCE was not in results.
+    """
+    filtered = []
+    no_evidence_score = None
+
+    for r in results:
+        if r.text == NO_EVIDENCE_TOKEN:
+            no_evidence_score = r.score
+        else:
+            filtered.append(r)
+
+    # Re-rank after filtering
+    for i, r in enumerate(filtered, 1):
+        r.rank = i
+
+    return filtered, no_evidence_score
+
+
+def get_evidence_above_no_evidence(
+    results: List[RerankerResult],
+) -> List[RerankerResult]:
+    """Get all evidence ranked above NO_EVIDENCE (dynamic-k).
+
+    This implements a learned dynamic-k: return all sentences that the model
+    ranked higher than the NO_EVIDENCE pseudo-candidate.
+
+    Args:
+        results: Sorted list of RerankerResult (highest score first).
+
+    Returns:
+        List of results ranked above NO_EVIDENCE.
+        Empty list if NO_EVIDENCE is ranked first (no evidence case).
+        All results if NO_EVIDENCE is not present (fallback).
+    """
+    evidence_above = []
+
+    for r in results:
+        if r.text == NO_EVIDENCE_TOKEN:
+            break  # Stop at NO_EVIDENCE
+        evidence_above.append(r)
+
+    # Re-rank
+    for i, r in enumerate(evidence_above, 1):
+        r.rank = i
+
+    return evidence_above
 
 
 @dataclass
