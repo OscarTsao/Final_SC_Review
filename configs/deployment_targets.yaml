@@ -1,0 +1,82 @@
+# Deployment Optimization Targets
+# Created: 2026-01-14
+#
+# These targets define the operating constraints for the evidence detection pipeline.
+# The optimization will find the best configuration that satisfies these constraints.
+
+# Profile definitions
+profiles:
+  high_recall_low_hallucination:
+    description: "Default profile - prioritize not missing evidence while keeping false positives low"
+    targets:
+      # No-evidence gate targets
+      max_fpr: 0.05              # negative coverage <= 5% (false positive rate)
+      min_tpr: 0.90              # positive coverage >= 90% (true positive rate / recall)
+      # Evidence extraction targets (only on GT has-evidence queries)
+      min_evidence_recall: 0.93  # aim near reranker@5 baseline (93.08%)
+      # Cost target
+      max_avg_k: 5.0             # allow avg_k up to 5 for "don't miss evidence"
+
+  ultra_safe:
+    description: "Ultra conservative - minimize false positives at all costs"
+    targets:
+      max_fpr: 0.03              # very strict false positive control
+      min_tpr: 0.85              # accept slightly lower recall for safety
+      min_evidence_recall: 0.90  # lower evidence recall acceptable
+      max_avg_k: 3.0             # keep cost moderate
+
+  cheap:
+    description: "Cost-efficient - minimize returned candidates"
+    targets:
+      max_fpr: 0.10              # allow more false positives
+      min_tpr: 0.85              # moderate recall
+      min_evidence_recall: 0.85  # lower evidence recall acceptable
+      max_avg_k: 2.0             # very strict cost control
+
+# Default profile to use
+default_profile: high_recall_low_hallucination
+
+# Optimization settings
+optimization:
+  # Tune/eval split ratio for threshold optimization
+  tune_eval_split: 0.7  # 70% tune, 30% eval
+  split_seed: 42
+  stratify_by: gt_has_evidence
+
+  # Grid search settings
+  grid_search:
+    threshold_range: [-10.0, 10.0]
+    threshold_steps: 200
+    margin_range: [-5.0, 5.0]
+    margin_steps: 100
+
+  # Optuna settings (optional refinement)
+  optuna:
+    n_trials: 100
+    timeout_seconds: 300
+
+# Metrics to report
+metrics:
+  ne_gate:
+    - tpr  # true positive rate (sensitivity/recall)
+    - tnr  # true negative rate (specificity)
+    - fpr  # false positive rate
+    - fnr  # false negative rate
+    - precision
+    - npv  # negative predictive value
+    - f1
+    - mcc
+    - auroc
+    - auprc
+
+  evidence_extraction:
+    - recall_at_k
+    - ndcg_at_k
+    - hit_rate_at_1
+    - precision_at_k
+
+  deployment:
+    - positive_coverage  # same as TPR
+    - negative_coverage  # same as FPR
+    - avg_k
+    - k_distribution

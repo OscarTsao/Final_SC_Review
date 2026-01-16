@@ -2,6 +2,7 @@
 """Run inference-only HPO for all retriever x reranker combinations.
 
 This establishes baselines before fine-tuning HPO.
+Uses the full model zoo for comprehensive evaluation.
 """
 
 import argparse
@@ -13,7 +14,37 @@ from pathlib import Path
 from datetime import datetime
 import csv
 
-# Available retrievers and rerankers
+# Import zoo classes to get all available models
+from final_sc_review.retriever.zoo import RetrieverZoo
+from final_sc_review.reranker.zoo import RerankerZoo
+
+
+def get_all_retrievers():
+    """Get all retriever configs from the zoo."""
+    return [(c.name, c.model_id) for c in RetrieverZoo.DEFAULT_RETRIEVERS]
+
+
+def get_all_rerankers():
+    """Get all reranker configs from the zoo."""
+    return [(c.name, c.model_id) for c in RerankerZoo.DEFAULT_RERANKERS]
+
+
+# Models to skip (known issues)
+SKIP_RETRIEVERS = [
+    "qwen3-embed-8b-4bit",  # Duplicate
+    "colbertv2",            # Requires special installation
+    "splade-cocondenser",   # SPLADE requires special handling
+    "splade-v2-distil",     # SPLADE requires special handling
+    "mxbai-colbert-large",  # ColBERT variant
+]
+
+SKIP_RERANKERS = [
+    "bge-reranker-gemma2-lightweight",  # OOM issues
+    "bge-reranker-v2-minicpm",          # Compatibility issues
+    "rank-zephyr-7b",                    # Too large
+]
+
+# Legacy lists for backward compatibility
 RETRIEVERS = [
     "bge-m3",
     "nv-embed-v2",
@@ -39,6 +70,7 @@ paths:
   hpo_output_dir: outputs/hpo_inference_combos
 
 models:
+  bge_m3: BAAI/bge-m3
   retriever_name: {retriever}
   bge_query_max_length: 128
   bge_passage_max_length: 256
@@ -80,10 +112,8 @@ search_space:
   top_k_final: [1, 3, 5, 10]
   use_sparse: [true, false]
   use_multiv: [true, false]
-  w_dense: [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-  w_sparse: [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-  w_multiv: [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-  normalization: [minmax, zscore, none]
+  fusion_method: [weighted_sum, rrf]
+  score_normalization: [minmax_per_query, zscore_per_query, none]
 """
 
 
@@ -164,14 +194,41 @@ def main():
                         help="Specific rerankers to run (default: all)")
     parser.add_argument("--skip_existing", action="store_true",
                         help="Skip combinations that already have results")
+    parser.add_argument("--all_zoo", action="store_true",
+                        help="Use all models from the zoo (default: use legacy list)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Filter retrievers/rerankers if specified
-    retrievers = args.retrievers if args.retrievers else RETRIEVERS
-    reranker_list = [(n, m) for n, m in RERANKERS if args.rerankers is None or n in args.rerankers]
+    # Get model lists based on --all_zoo flag
+    if args.all_zoo:
+        # Use full zoo, filtering out problematic models
+        all_retrievers = get_all_retrievers()
+        all_rerankers = get_all_rerankers()
+
+        retriever_list = [(name, model_id) for name, model_id in all_retrievers
+                          if name not in SKIP_RETRIEVERS]
+        reranker_full_list = [(name, model_id) for name, model_id in all_rerankers
+                              if name not in SKIP_RERANKERS]
+
+        # Apply user filters if specified
+        if args.retrievers:
+            retriever_list = [(n, m) for n, m in retriever_list if n in args.retrievers]
+        if args.rerankers:
+            reranker_full_list = [(n, m) for n, m in reranker_full_list if n in args.rerankers]
+
+        retrievers = [name for name, _ in retriever_list]
+        retriever_model_ids = {name: model_id for name, model_id in retriever_list}
+        reranker_list = reranker_full_list
+
+        print(f"Using full zoo: {len(retrievers)} retrievers x {len(reranker_list)} rerankers = {len(retrievers) * len(reranker_list)} combinations")
+        print(f"Skipped retrievers: {SKIP_RETRIEVERS}")
+        print(f"Skipped rerankers: {SKIP_RERANKERS}")
+    else:
+        # Use legacy lists for backward compatibility
+        retrievers = args.retrievers if args.retrievers else RETRIEVERS
+        reranker_list = [(n, m) for n, m in RERANKERS if args.rerankers is None or n in args.rerankers]
 
     results = []
     results_file = output_dir / "inference_hpo_results.csv"

@@ -1,0 +1,49 @@
+# Reranker Training Configuration with NO_EVIDENCE Pseudo-Candidate
+#
+# This configuration trains the reranker to properly discriminate between
+# has-evidence and no-evidence queries by including NO_EVIDENCE as a
+# pseudo-candidate in every group.
+#
+# For has-evidence queries: NO_EVIDENCE is a negative (should score low)
+# For no-evidence queries: NO_EVIDENCE is the positive (should score highest)
+
+paths:
+  data_dir: data
+  groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
+  output_dir: outputs/reranker_with_no_evidence
+
+models:
+  jina_v3: jinaai/jina-reranker-v3
+  max_length: 256
+
+data:
+  max_candidates: 16
+  # Enable NO_EVIDENCE pseudo-candidate training
+  add_no_evidence: true
+  include_no_evidence_queries: true
+
+split:
+  seed: 42
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+train:
+  batch_size: 1
+  num_epochs: 5  # More epochs since more diverse data
+  learning_rate: 0.00002
+  weight_decay: 0.01
+  early_stopping_patience: 3
+
+loss:
+  # Weight tuning for NO_EVIDENCE training
+  # Increase listwise weight to learn proper ranking with NO_EVIDENCE
+  w_list: 1.5
+  w_pair: 1.0
+  w_point: 0.5  # Reduce pointwise since we care more about ranking
+  temperature: 1.0
+  max_pairs_per_group: 32
+
+# Expected behavior after training:
+# - For has-evidence queries: real evidence > NO_EVIDENCE > non-evidence
+# - For no-evidence queries: NO_EVIDENCE > all candidates

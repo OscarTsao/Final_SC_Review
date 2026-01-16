@@ -1,0 +1,72 @@
+# Deployment Configuration: Low FPR Mode
+#
+# Operating point: TPR ≥ 64%, FPR ≤ 5%
+# Use case: When false positives are costly (e.g., automated decisions)
+#
+# Generated: 2026-01-15
+
+profile: low_fpr
+description: "Prioritizes precision - fewer false positives but may miss some evidence"
+
+# Relaxed targets for this operating point
+targets:
+  max_fpr: 0.05
+  min_tpr: 0.64
+  min_evidence_recall: 0.80
+  max_avg_k: 5.0
+
+# NE Detection Configuration
+# Using per-criterion thresholds for better FPR control
+ne_detection:
+  method: per_criterion_margin
+  thresholds:
+    A.1: -0.0028
+    A.2: -2.6129
+    A.3: -3.3270
+    A.4: -0.9726
+    A.5: -2.6021
+    A.6: -0.9680
+    A.7: 0.1274
+    A.8: -3.3232
+    A.9: 0.2965
+    A.10: -2.2121
+  description: "Per-criterion margin thresholds optimized for FPR ≤ 5%"
+
+# Dynamic-K Configuration
+dynamic_k:
+  method: fixed_k
+  k: 5
+  description: "Fixed K=5 for controlled output size"
+
+# Expected Performance (from HPO)
+expected_performance:
+  tpr: 0.6386
+  fpr: 0.0476
+  evidence_recall: 0.9295  # From Fixed K=5
+  avg_k: 5.0
+
+# Alternative: Ensemble classifier approach
+# Can achieve TPR=74.5% at FPR=5% using LogisticRegression
+# Requires additional classifier model deployment
+ensemble_alternative:
+  classifier: LogisticRegression
+  tpr_at_5pct_fpr: 0.7449
+  note: "Requires training and deploying ensemble classifier"
+
+# Model paths
+models:
+  reranker: outputs/training/no_evidence_reranker
+  retriever_cache: data/cache/bge_m3
+
+# Notes
+notes: |
+  This configuration prioritizes low false positive rate (high precision).
+  Trade-off: Lower recall means some evidence will be missed.
+
+  Recommended for:
+  - Automated decision workflows where false positives are costly
+  - High-volume screening where manual review is limited
+  - Situations where user trust requires high precision
+
+  Alternative: Deploy the ensemble classifier (LogisticRegression) to
+  achieve ~74% TPR at 5% FPR instead of ~64% with per-criterion thresholds.

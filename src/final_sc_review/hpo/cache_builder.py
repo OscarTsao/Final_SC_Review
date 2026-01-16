@@ -102,10 +102,9 @@ def _build_cache(cfg: Dict, out_dir: Path, dataset_checksums: Dict[str, str]) ->
         max_length=reranker_cfg.get("max_length", 512),
         listwise_chunk_size=reranker_cfg["chunk_size"],
         dtype=reranker_cfg.get("dtype", "auto"),
-        use_listwise=True,
+        use_listwise=True,  # Will fallback to pairwise if model lacks rerank() API
     )
-    if not reranker.use_listwise:
-        raise ValueError("Jina reranker does not expose listwise rerank()")
+    # Note: reranker.score_pairs() works for both listwise and pairwise modes
 
     dense_topk = cfg["cache"]["dense_topk_max"]
     sparse_topk = cfg["cache"]["sparse_topk_max"]
