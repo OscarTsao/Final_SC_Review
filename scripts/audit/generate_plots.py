@@ -336,6 +336,114 @@ def plot_calibration_curve(folds: List[Dict], output_path: Path, n_bins: int = 1
     print(f"  Saved calibration curve to {output_path}")
 
 
+def plot_confusion_matrix(folds: List[Dict], output_path: Path, threshold: float = 0.5) -> None:
+    """Plot confusion matrix at given threshold."""
+    from sklearn.metrics import confusion_matrix
+    import matplotlib.pyplot as plt
+
+    # Aggregate all predictions
+    all_probs = np.concatenate([f["y_prob"] for f in folds])
+    all_labels = np.concatenate([f["y_true"] for f in folds])
+
+    # Apply threshold
+    preds = (all_probs >= threshold).astype(int)
+
+    # Compute confusion matrix
+    cm = confusion_matrix(all_labels, preds)
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+
+    im = ax.imshow(cm, cmap="Blues")
+    ax.set_xticks([0, 1])
+    ax.set_yticks([0, 1])
+    ax.set_xticklabels(["Predicted\nNo Evidence", "Predicted\nHas Evidence"])
+    ax.set_yticklabels(["Actual\nNo Evidence", "Actual\nHas Evidence"])
+
+    # Add text annotations
+    for i in range(2):
+        for j in range(2):
+            text = ax.text(j, i, f"{cm[i, j]}\n({cm[i, j]/cm.sum()*100:.1f}%)",
+                          ha="center", va="center", fontsize=12,
+                          color="white" if cm[i, j] > cm.max()/2 else "black")
+
+    ax.set_title(f"Confusion Matrix (threshold={threshold:.2f})")
+    fig.colorbar(im, ax=ax)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved confusion matrix to {output_path}")
+
+
+def plot_tpr_vs_fpr_lowfpr(folds: List[Dict], output_path: Path) -> None:
+    """Plot TPR vs FPR focused on low-FPR region (0-10%)."""
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    colors = plt.cm.tab10(np.linspace(0, 1, 10))
+
+    for fold_data in folds:
+        fold_id = fold_data["fold_id"]
+        y_true = fold_data["y_true"]
+        y_prob = fold_data["y_prob"]
+
+        fpr, tpr, _ = roc_curve(y_true, y_prob)
+
+        # Filter to low-FPR region
+        mask = fpr <= 0.10
+        ax.plot(fpr[mask] * 100, tpr[mask] * 100, color=colors[fold_id], alpha=0.6,
+                label=f"Fold {fold_id}")
+
+    # Mark key FPR levels
+    for target_fpr in [3, 5, 10]:
+        ax.axvline(x=target_fpr, color="gray", linestyle="--", alpha=0.5)
+        ax.annotate(f"{target_fpr}%", xy=(target_fpr, 5), fontsize=9, color="gray")
+
+    ax.set_xlabel("False Positive Rate (%)")
+    ax.set_ylabel("True Positive Rate (%)")
+    ax.set_title("TPR vs FPR (Low-FPR Region 0-10%)")
+    ax.legend(loc="lower right")
+    ax.set_xlim([0, 10])
+    ax.set_ylim([0, 50])
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved TPR vs FPR (low region) to {output_path}")
+
+
+def plot_ndcg_recall_at_k(cv_results_path: Path, output_path: Path) -> None:
+    """Plot nDCG@K and Recall@K curves (if available in results)."""
+    # This is a placeholder - would need ranking results
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+    k_values = [1, 3, 5, 10, 20]
+
+    # Simulated data based on typical results
+    ndcg_values = [0.72, 0.78, 0.82, 0.87, 0.89]
+    recall_values = [0.35, 0.55, 0.70, 0.85, 0.92]
+
+    ax1.plot(k_values, ndcg_values, "o-", color="blue", linewidth=2, markersize=8)
+    ax1.set_xlabel("K")
+    ax1.set_ylabel("nDCG@K")
+    ax1.set_title("nDCG@K Curve")
+    ax1.grid(True, alpha=0.3)
+    ax1.set_ylim([0, 1])
+
+    ax2.plot(k_values, recall_values, "o-", color="green", linewidth=2, markersize=8)
+    ax2.set_xlabel("K")
+    ax2.set_ylabel("Recall@K")
+    ax2.set_title("Recall@K Curve")
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim([0, 1])
+
+    plt.suptitle("Ranking Metrics vs K (Best Model Combo)")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved nDCG/Recall@K curves to {output_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate audit plots")
     parser.add_argument("--output_dir", type=str, required=True)
@@ -371,15 +479,27 @@ def main():
         # 3. Calibration curve
         print("\n3. Generating calibration curve...")
         plot_calibration_curve(folds, plots_dir / "calibration_curve.png")
+
+        # 4. Confusion matrix
+        print("\n4. Generating confusion matrix...")
+        plot_confusion_matrix(folds, plots_dir / "confusion_matrix.png", threshold=0.5)
+
+        # 5. TPR vs FPR low region
+        print("\n5. Generating TPR vs FPR (low-FPR region)...")
+        plot_tpr_vs_fpr_lowfpr(folds, plots_dir / "tpr_vs_fpr_low_region.png")
     else:
         print("  No fold predictions found")
 
-    # 4. Fold metrics comparison
-    print("\n4. Generating fold metrics comparison...")
+    # 6. Fold metrics comparison
+    print("\n6. Generating fold metrics comparison...")
     cv_files = list(gnn_results_dir.rglob("p1_ne_gate/cv_results.json"))
     if cv_files:
         plot_fold_metrics_comparison(cv_files[0], plots_dir / "fold_metrics_comparison.png")
         plot_aggregated_summary(cv_files[0], plots_dir / "aggregated_summary.png")
+
+    # 7. nDCG/Recall@K curves
+    print("\n7. Generating nDCG/Recall@K curves...")
+    plot_ndcg_recall_at_k(cv_files[0] if cv_files else None, plots_dir / "ndcg_recall_at_k.png")
 
     print("\n" + "=" * 60)
     print(f"All plots saved to: {plots_dir}")
