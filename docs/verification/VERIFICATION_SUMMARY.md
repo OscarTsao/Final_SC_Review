@@ -79,6 +79,26 @@ performance_gain: +52% AUROC vs baseline
 
 ---
 
+## Visualizations
+
+**Key Performance Plots** (in `docs/verification/figures/`):
+
+1. **ROC/PR Curves** (`roc_pr_curves.png`)
+   - P1 NE Gate: AUC=0.593
+   - Baseline prevalence: 9.3%
+
+2. **Calibration Plots** (`calibration_plots.png`)
+   - P1 Expected Calibration Error (ECE): Low
+   - Shows model confidence alignment with true positive rates
+
+3. **Component Comparison** (`component_comparison.png`)
+   - P1 NE Gate: AUROC=0.593
+   - P2 Dynamic-K: Evidence Recall=0.913
+   - P3 Graph Reranker: Recall@5=0.728
+   - P4 Criterion-Aware: AUROC=0.905
+
+---
+
 ## Documentation
 
 **Detailed Reports**:
