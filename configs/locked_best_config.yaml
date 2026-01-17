@@ -1,61 +1,101 @@
-# LOCKED BEST CONFIGURATION - DO NOT MODIFY
-# Generated from HPO experiments on 2026-01-09
-# This configuration is locked for final test evaluation
+# LOCKED BEST CONFIGURATION - HPO OPTIMIZED
+# Updated: 2026-01-17 based on HPO experiments (324 model combos tested)
+# Best combo: nv-embed-v2 + jina-reranker-v3 (nDCG@10 = 0.8658)
+# This configuration is locked for final test evaluation - DO NOT MODIFY
 
-# Best models selected from HPO
+# Best models selected from HPO model zoo
 models:
   retriever:
-    name: bge-large-en-v1.5
-    model_id: BAAI/bge-large-en-v1.5
+    name: nv-embed-v2
+    model_id: nvidia/NV-Embed-v2
     type: dense
-    dev_select_oracle@10: 0.8581
+    max_length: 512
+    batch_size: 8
+    query_prefix: "Instruct: Given a criterion, retrieve sentences that provide direct supporting evidence.\nQuery: "
+    trust_remote_code: true
+    use_4bit: false
+    hpo_ndcg10: 0.8658
 
   reranker:
-    name: bge-reranker-v2-m3
-    model_id: BAAI/bge-reranker-v2-m3
-    dev_select_oracle@10: 0.8803
+    name: jina-reranker-v3
+    model_id: jinaai/jina-reranker-v3
+    type: listwise
+    max_length: 1024
+    batch_size: 128
+    trust_remote_code: true
 
-# Combined pipeline performance on dev_select
+# Best HPO parameters (50 trials)
+retriever:
+  top_k_retriever: 24
+  top_k_final: 10
+  use_sparse: false
+  use_colbert: false
+  use_multiv: false
+  fusion_method: rrf
+  score_normalization: none
+  rrf_k: 60
+  rebuild_cache: false
+
+# Combined pipeline performance on dev (val split)
 pipeline:
-  dev_select_oracle@3: 0.6898
-  dev_select_oracle@5: 0.7789
-  dev_select_oracle@10: 0.8713
+  hpo_ndcg10: 0.8658
+  hpo_n_trials: 50
+  hpo_total_combos: 324
 
-# K policy
+# K policy for evaluation
 k_policy:
-  k_primary: [3, 5, 10]
-  top_k_retriever: 20
+  k_primary: [1, 3, 5, 10, 20]
+  top_k_retriever: 24
 
-# Postprocessing settings
+# GNN-enhanced postprocessing (P3-P4 models)
 postprocessing:
-  no_evidence_method: max_score
-  no_evidence_threshold: 0.2
-  dynamic_k_method: elbow
+  # P4 Criterion-Aware NE Gate
+  ne_gate:
+    model: P4_CriterionAwareGNN
+    auroc: 0.8967
+    f1: 0.6973
+
+  # P3 Graph Reranker
+  graph_reranker:
+    model: P3_GraphRerankerGNN
+    mrr_improvement: 0.371
+    recall5_improvement: 0.384
+
+  # P2 Dynamic-K Selection
+  dynamic_k:
+    method: mass
+    gamma: 0.8
+    k_min: 2
+    k_max: 10
+    avg_k: 5.01
 
 # Data paths
 paths:
   data_dir: data
   groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
   sentence_corpus: data/groundtruth/sentence_corpus.jsonl
-  cache_dir: data/cache
+  cache_dir: data/cache/nv-embed-v2
+  hpo_cache_dir: outputs/hpo_cache/ab3ad5447414cc2d
 
 # Split configuration
 split:
   seed: 42
-  train_ratio: 0.6
-  val_ratio: 0.2
-  test_ratio: 0.2
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
 
 # Evaluation settings
 evaluation:
-  ks: [3, 5, 10]
+  ks: [1, 3, 5, 10, 20]
   split: test
   skip_no_positives: false  # Include empty queries for deployment metrics
 
 # Metadata
 metadata:
   created: "2026-01-09"
-  description: "Locked configuration from HPO experiments for final test evaluation"
-  gpu_hours_spent: 7.24
-  n_retriever_trials: 150
-  n_reranker_trials: 48
+  updated: "2026-01-17"
+  description: "Locked configuration from HPO model zoo experiments"
+  hpo_combo: "nv-embed-v2 + jina-reranker-v3"
+  n_retriever_combos: 25
+  n_reranker_combos: 15
+  total_hpo_combos: 324

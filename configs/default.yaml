@@ -1,32 +1,53 @@
+# DEFAULT CONFIGURATION - BEST MODEL COMBO
+# Updated: 2026-01-17 based on HPO results
+# Best combo: nv-embed-v2 + jina-reranker-v3 (nDCG@10 = 0.8658)
+#
+# Note: This config supports both:
+# - Legacy pipeline (BgeM3Retriever + JinaV3Reranker) via bge_m3/jina_v3 keys
+# - Zoo pipeline (any retriever + reranker from zoo) via retriever_name/reranker_name keys
+
 paths:
   data_dir: data
   groundtruth: data/groundtruth/evidence_sentence_groundtruth.csv
   sentence_corpus: data/groundtruth/sentence_corpus.jsonl
-  cache_dir: data/cache/bge_m3
+  cache_dir: data/cache/nv-embed-v2
 
 models:
+  # === Zoo Pipeline (BEST) - Use with scripts/eval_zoo_pipeline.py ===
+  # Best retriever from HPO model zoo (324 combinations tested)
+  retriever_name: nv-embed-v2
+  retriever_model_id: nvidia/NV-Embed-v2
+
+  # Best reranker from HPO model zoo
+  reranker_name: jina-reranker-v3
+  reranker_model_id: jinaai/jina-reranker-v3
+
+  # === Legacy Pipeline - For backward compatibility ===
+  # These are used by scripts/eval_sc_pipeline.py and scripts/run_single.py
   bge_m3: BAAI/bge-m3
   jina_v3: jinaai/jina-reranker-v3
   bge_query_max_length: 128
   bge_passage_max_length: 256
   bge_use_fp16: true
   bge_batch_size: 64
-  reranker_max_length: 512
-  reranker_chunk_size: 64
+  reranker_max_length: 1024
+  reranker_chunk_size: 128
   reranker_dtype: auto
   reranker_use_listwise: true
 
 retriever:
-  top_k_retriever: 50
-  top_k_colbert: 50
-  top_k_final: 20
-  use_sparse: true
-  use_colbert: true
-  dense_weight: 0.6
-  sparse_weight: 0.2
-  colbert_weight: 0.2
-  fusion_method: weighted_sum
-  score_normalization: minmax_per_query
+  # Best HPO parameters (from 50 trials on nv-embed-v2 + jina-reranker-v3)
+  top_k_retriever: 24
+  top_k_rerank: 24
+  top_k_final: 10
+  use_sparse: false  # nv-embed-v2 is dense-only
+  use_colbert: false  # nv-embed-v2 is dense-only
+  use_multiv: false
+  dense_weight: 1.0
+  sparse_weight: 0.0
+  colbert_weight: 0.0
+  fusion_method: rrf
+  score_normalization: none
   rrf_k: 60
   rebuild_cache: false
 
@@ -38,6 +59,20 @@ split:
 
 evaluation:
   split: test
-  ks: [1, 5, 10, 20]
+  ks: [1, 3, 5, 10, 20]
   skip_no_positives: true
   save_query_csv: true
+
+# Metadata
+metadata:
+  updated: "2026-01-17"
+  hpo_combo: "nv-embed-v2 + jina-reranker-v3"
+  hpo_ndcg10: 0.8658
+  hpo_n_trials: 50
+  hpo_total_combos: 324
+  notes: |
+    Best configuration from HPO model zoo experiments.
+    For full zoo pipeline performance (nDCG@10=0.8658), use:
+      python scripts/eval_zoo_pipeline.py --config configs/default.yaml
+    For legacy BGE-M3 pipeline, use:
+      python scripts/eval_sc_pipeline.py --config configs/default.yaml
