@@ -42,14 +42,14 @@ class NEGateMetrics:
 
     def to_dict(self) -> Dict[str, float]:
         return {
-            "auroc": self.auroc,
-            "auprc": self.auprc,
-            "tpr_at_fpr_3pct": self.tpr_at_fpr_3pct,
-            "tpr_at_fpr_5pct": self.tpr_at_fpr_5pct,
-            "tpr_at_fpr_10pct": self.tpr_at_fpr_10pct,
-            "threshold_at_fpr_5pct": self.threshold_at_fpr_5pct,
-            "n_samples": self.n_samples,
-            "has_evidence_rate": self.has_evidence_rate,
+            "auroc": float(self.auroc),
+            "auprc": float(self.auprc),
+            "tpr_at_fpr_3pct": float(self.tpr_at_fpr_3pct),
+            "tpr_at_fpr_5pct": float(self.tpr_at_fpr_5pct),
+            "tpr_at_fpr_10pct": float(self.tpr_at_fpr_10pct),
+            "threshold_at_fpr_5pct": float(self.threshold_at_fpr_5pct),
+            "n_samples": int(self.n_samples),
+            "has_evidence_rate": float(self.has_evidence_rate),
         }
 
     @classmethod

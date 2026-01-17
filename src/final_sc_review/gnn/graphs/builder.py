@@ -292,10 +292,12 @@ class GraphBuilder:
         )
 
         # Create PyG Data object
+        # Note: Always create edge_attr as tensor (empty if no edges) for batch compatibility
+        edge_attr = torch.tensor(edge_features, dtype=torch.float32) if len(edge_features) > 0 else torch.empty((0, 2), dtype=torch.float32)
         data = Data(
             x=torch.tensor(node_features, dtype=torch.float32),
             edge_index=torch.tensor(edge_index, dtype=torch.long),
-            edge_attr=torch.tensor(edge_features, dtype=torch.float32) if len(edge_features) > 0 else None,
+            edge_attr=edge_attr,
         )
 
         # Store metadata
@@ -416,7 +418,7 @@ class QueryGraphDataset(InMemoryDataset if HAS_PYG else object):
             self.data, self.slices = self.collate(self._graphs)
         else:
             # Try to load processed data
-            self.data, self.slices = torch.load(self.processed_paths[0])
+            self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
 
     @property
     def raw_file_names(self) -> List[str]:
@@ -445,7 +447,7 @@ class QueryGraphDataset(InMemoryDataset if HAS_PYG else object):
     @classmethod
     def load(cls, path: Path, transform=None) -> "QueryGraphDataset":
         """Load dataset from disk."""
-        data, slices = torch.load(path)
+        data, slices = torch.load(path, weights_only=False)
         dataset = cls(str(path.parent), transform=transform)
         dataset.data = data
         dataset.slices = slices

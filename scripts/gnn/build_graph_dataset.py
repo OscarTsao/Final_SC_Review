@@ -253,12 +253,9 @@ def build_graph_dataset(
     for fold_id, graphs in fold_graphs.items():
         fold_path = out_path / f"fold_{fold_id}.pt"
 
-        # Collate graphs
-        from torch_geometric.data import Batch
-        batch = Batch.from_data_list(graphs)
-
+        # Save graphs list directly (DataLoader will batch dynamically)
+        # Note: Avoid Batch.from_data_list() which requires all graphs to have identical attributes
         torch.save({
-            "data": batch,
             "graphs": graphs,
             "n_graphs": len(graphs),
         }, fold_path)

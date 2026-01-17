@@ -43,7 +43,7 @@ def load_graphs(graph_dir: Path, n_folds: int = 5) -> tuple:
             logger.warning(f"Fold file not found: {fold_path}")
             continue
 
-        data = torch.load(fold_path)
+        data = torch.load(fold_path, weights_only=False)
         graphs = data["graphs"]
 
         all_graphs.extend(graphs)

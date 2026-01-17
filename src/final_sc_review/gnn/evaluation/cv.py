@@ -170,8 +170,8 @@ class CrossValidator:
             "fold_id": fold_id,
             "metrics": metrics.to_dict(),
             "train_result": {
-                "best_epoch": train_result["best_epoch"],
-                "best_metric": train_result["best_metric"],
+                "best_epoch": int(train_result["best_epoch"]),
+                "best_metric": float(train_result["best_metric"]),
             },
             "n_train": len(inner_train_graphs),
             "n_tune": len(tune_graphs),

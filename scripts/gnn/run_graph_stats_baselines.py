@@ -62,7 +62,7 @@ def load_graph_dataset(graph_dir: Path, fold_id: int) -> Tuple[List, Dict]:
     if not fold_path.exists():
         raise FileNotFoundError(f"Fold file not found: {fold_path}")
 
-    data = torch.load(fold_path)
+    data = torch.load(fold_path, weights_only=False)
     graphs = data["graphs"]
 
     logger.info(f"Loaded fold {fold_id}: {len(graphs)} graphs")

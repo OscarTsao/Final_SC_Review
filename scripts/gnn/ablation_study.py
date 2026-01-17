@@ -66,7 +66,7 @@ def load_graphs(graph_dir: Path, n_folds: int = 5) -> tuple:
         if not fold_path.exists():
             continue
 
-        data = torch.load(fold_path)
+        data = torch.load(fold_path, weights_only=False)
         graphs = data["graphs"]
         all_graphs.extend(graphs)
         fold_ids.extend([fold_id] * len(graphs))
