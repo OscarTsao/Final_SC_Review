@@ -3,6 +3,8 @@
 This module provides a clean interface to Gemini 1.5 Flash for:
 - LLM reranking (post-P3)
 - LLM verification (evidence correctness)
+
+Uses the new google-genai package (google.generativeai is deprecated).
 """
 
 import json
@@ -11,7 +13,8 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
@@ -48,18 +51,8 @@ class GeminiClient:
                 "GEMINI_API_KEY not found. Set it via environment variable or pass as argument."
             )
 
-        genai.configure(api_key=api_key)
-
-        # Initialize model
-        self.model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config={
-                "temperature": temperature,
-                "top_p": 0.95,
-                "top_k": 40,
-                "max_output_tokens": 8192,
-            },
-        )
+        # Initialize client with new API
+        self.client = genai.Client(api_key=api_key)
 
         logger.info(f"Initialized GeminiClient with model={model_name}, temp={temperature}")
 
@@ -83,8 +76,17 @@ class GeminiClient:
         """
         for attempt in range(self.max_retries):
             try:
-                # Generate response
-                response = self.model.generate_content(prompt)
+                # Generate response using new API
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=self.temperature,
+                        top_p=0.95,
+                        top_k=40,
+                        max_output_tokens=8192,
+                    ),
+                )
 
                 # Extract text
                 text = response.text.strip()
@@ -141,7 +143,16 @@ class GeminiClient:
         """
         for attempt in range(self.max_retries):
             try:
-                response = self.model.generate_content(prompt)
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=self.temperature,
+                        top_p=0.95,
+                        top_k=40,
+                        max_output_tokens=8192,
+                    ),
+                )
                 return response.text.strip()
 
             except Exception as e:

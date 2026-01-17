@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from torch_geometric.data import Data
 from tqdm import tqdm
@@ -37,6 +38,38 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+def load_text_data():
+    """Load sentence corpus, posts, and criteria for text lookup.
+
+    Returns:
+        (sentence_dict, post_dict, criterion_dict)
+    """
+    # Load sentence corpus
+    corpus_file = Path("data/groundtruth/sentence_corpus.jsonl")
+    sentence_dict = {}
+    with open(corpus_file) as f:
+        for line in f:
+            sent = json.loads(line)
+            sentence_dict[sent["sent_uid"]] = sent["text"]
+
+    # Load posts (reconstruct from sentences for now - not ideal but works for pilot)
+    post_dict = {}
+    # We'll populate this on-the-fly from sentences
+
+    # Load criteria
+    criteria_file = Path("data/DSM5/MDD_Criteira.json")
+    with open(criteria_file) as f:
+        criteria_data = json.load(f)
+
+    criterion_dict = {}
+    for criterion in criteria_data["criteria"]:
+        criterion_dict[criterion["id"]] = criterion["text"]
+
+    logger.info(f"Loaded {len(sentence_dict)} sentences, {len(post_dict)} posts, {len(criterion_dict)} criteria")
+
+    return sentence_dict, post_dict, criterion_dict
 
 
 def load_sample_graphs(graph_cache_dir: Path, n_samples: int = 50):
@@ -62,7 +95,14 @@ def load_sample_graphs(graph_cache_dir: Path, n_samples: int = 50):
     if not fold_file.exists():
         raise ValueError(f"Fold file not found: {fold_file}")
 
-    graphs = torch.load(fold_file)
+    data = torch.load(fold_file, weights_only=False)
+
+    # Extract graphs list from dict
+    if isinstance(data, dict) and 'graphs' in data:
+        graphs = data['graphs']
+    else:
+        graphs = data
+
     logger.info(f"Loaded {len(graphs)} graphs from fold 0")
 
     # Take first n_samples
@@ -72,37 +112,46 @@ def load_sample_graphs(graph_cache_dir: Path, n_samples: int = 50):
     return sample_graphs
 
 
-def extract_graph_info(graph: Data):
+def extract_graph_info(graph: Data, sentence_dict: dict, post_dict: dict, criterion_dict: dict):
     """Extract information from PyG graph for LLM processing.
 
     Args:
         graph: PyG Data object
+        sentence_dict: Mapping from sent_uid to sentence text
+        post_dict: Mapping from post_id to post text
+        criterion_dict: Mapping from criterion_id to criterion text
 
     Returns:
         Dictionary with query info and candidates
     """
-    # Extract node features
-    n_nodes = graph.x.shape[0]
+    # Extract UIDs and scores from graph
+    candidate_uids = graph.candidate_uids
+    reranker_scores = graph.reranker_scores.tolist() if hasattr(graph.reranker_scores, 'tolist') else graph.reranker_scores
+    post_id = graph.post_id
+    criterion_id = graph.criterion_id
+    has_evidence = int(graph.y[0].item())
 
-    # Assuming graph has these attributes (from GNN pipeline)
-    # You may need to adjust based on actual graph structure
-    candidate_texts = graph.candidate_texts if hasattr(graph, 'candidate_texts') else [f"Sentence {i}" for i in range(n_nodes)]
-    candidate_ids = graph.candidate_ids if hasattr(graph, 'candidate_ids') else [f"uid_{i}" for i in range(n_nodes)]
-    reranker_scores = graph.reranker_scores if hasattr(graph, 'reranker_scores') else np.random.rand(n_nodes).tolist()
+    # Get text from dictionaries
+    candidate_texts = [sentence_dict.get(uid, f"[Missing: {uid}]") for uid in candidate_uids]
 
-    # Query info
-    query_text = graph.query_text if hasattr(graph, 'query_text') else "Sample query text"
-    criterion_text = graph.criterion_text if hasattr(graph, 'criterion_text') else "Sample criterion"
+    # Reconstruct post text from candidate sentences (simple approach for pilot)
+    # In full implementation, load actual post text from source
+    if post_id in post_dict:
+        query_text = post_dict[post_id]
+    else:
+        query_text = " ".join(candidate_texts)  # Use candidates as proxy
 
-    # Ground truth
-    has_evidence = graph.has_evidence if hasattr(graph, 'has_evidence') else 1
-    gold_ids = graph.gold_ids if hasattr(graph, 'gold_ids') else []
+    criterion_text = criterion_dict.get(criterion_id, f"[Missing criterion: {criterion_id}]")
+
+    # Ground truth labels
+    node_labels = graph.node_labels.tolist() if hasattr(graph.node_labels, 'tolist') else graph.node_labels
+    gold_ids = [uid for uid, label in zip(candidate_uids, node_labels) if label == 1]
 
     return {
         "query_text": query_text,
         "criterion_text": criterion_text,
         "candidates": candidate_texts,
-        "candidate_ids": candidate_ids,
+        "candidate_ids": candidate_uids,
         "reranker_scores": reranker_scores,
         "has_evidence": has_evidence,
         "gold_ids": set(gold_ids) if gold_ids else set(),
@@ -112,6 +161,9 @@ def extract_graph_info(graph: Data):
 def run_llm_reranker_pilot(
     graphs: list,
     client: GeminiClient,
+    sentence_dict: dict,
+    post_dict: dict,
+    criterion_dict: dict,
     top_m: int = 10,
 ):
     """Run LLM reranker on sample graphs.
@@ -119,6 +171,9 @@ def run_llm_reranker_pilot(
     Args:
         graphs: List of PyG graphs
         client: Gemini client
+        sentence_dict: Sentence text lookup
+        post_dict: Post text lookup
+        criterion_dict: Criterion text lookup
         top_m: Number of top candidates to rerank
 
     Returns:
@@ -132,7 +187,7 @@ def run_llm_reranker_pilot(
 
     results = []
     for graph in tqdm(graphs, desc="Reranking"):
-        info = extract_graph_info(graph)
+        info = extract_graph_info(graph, sentence_dict, post_dict, criterion_dict)
 
         try:
             reranked_indices, llm_scores = reranker.rerank(
@@ -169,6 +224,9 @@ def run_llm_reranker_pilot(
 def run_llm_verifier_pilot(
     graphs: list,
     client: GeminiClient,
+    sentence_dict: dict,
+    post_dict: dict,
+    criterion_dict: dict,
     verification_mode: str = "all",
 ):
     """Run LLM verifier on sample graphs.
@@ -176,6 +234,9 @@ def run_llm_verifier_pilot(
     Args:
         graphs: List of PyG graphs
         client: Gemini client
+        sentence_dict: Sentence text lookup
+        post_dict: Post text lookup
+        criterion_dict: Criterion text lookup
         verification_mode: Verification mode
 
     Returns:
@@ -189,7 +250,7 @@ def run_llm_verifier_pilot(
 
     results = []
     for graph in tqdm(graphs, desc="Verifying"):
-        info = extract_graph_info(graph)
+        info = extract_graph_info(graph, sentence_dict, post_dict, criterion_dict)
 
         # Take top-5 for verification pilot
         top_k = min(5, len(info["candidates"]))
@@ -280,6 +341,16 @@ def main():
         logger.error(f"Failed to initialize Gemini client: {e}")
         return
 
+    # Load text data
+    try:
+        sentence_dict, post_dict, criterion_dict = load_text_data()
+        logger.info("✓ Loaded text data")
+    except Exception as e:
+        logger.error(f"Failed to load text data: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+
     # Load sample graphs
     try:
         graph_cache_dir = Path("data/cache/gnn")
@@ -295,7 +366,9 @@ def main():
     # Test reranker
     if args.test_reranker:
         try:
-            reranker_results = run_llm_reranker_pilot(graphs, client, top_m=args.top_m)
+            reranker_results = run_llm_reranker_pilot(
+                graphs, client, sentence_dict, post_dict, criterion_dict, top_m=args.top_m
+            )
             results["reranker"] = reranker_results
 
             # Save reranker results
@@ -312,7 +385,9 @@ def main():
     # Test verifier
     if args.test_verifier:
         try:
-            verifier_results = run_llm_verifier_pilot(graphs, client)
+            verifier_results = run_llm_verifier_pilot(
+                graphs, client, sentence_dict, post_dict, criterion_dict
+            )
             results["verifier"] = verifier_results
 
             # Save verifier results
